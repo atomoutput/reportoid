@@ -5,7 +5,7 @@ Main application controller
 import tkinter as tk
 from tkinter import filedialog, messagebox
 import pandas as pd
-from typing import Dict, Any
+from typing import Dict, Any, List
 import uuid
 from datetime import datetime
 
