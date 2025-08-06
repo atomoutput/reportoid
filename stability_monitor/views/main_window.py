@@ -5,6 +5,7 @@ Main application window
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from typing import Dict, Any, Callable
+from .quality_management import DataQualityTab
 
 class MainWindow:
     """Main application window with all UI components"""
@@ -121,6 +122,10 @@ class MainWindow:
         
         # Create results panel
         self._create_results_panel()
+        
+        # Data Quality tab
+        self.quality_tab = DataQualityTab(self.notebook, self.settings)
+        self.notebook.add(self.quality_tab, text="Data Quality")
     
     def _create_filter_panel(self):
         """Create the filters panel"""
@@ -331,6 +336,30 @@ class MainWindow:
                                             command=self._on_export_filtered_data,
                                             state="disabled")
         self.export_filtered_btn.pack(side=tk.LEFT)
+        
+        # Phase 2: Advanced Analytics Reports (fourth row)
+        analytics_frame = ttk.Frame(reports_frame)
+        analytics_frame.pack(fill=tk.X, pady=(5, 0))
+        
+        self.stability_dashboard_btn = ttk.Button(analytics_frame, text="🏗️ Stability Dashboard",
+                                                command=lambda: self._on_run_report("system_stability_dashboard"),
+                                                state="disabled")
+        self.stability_dashboard_btn.pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.pattern_analysis_btn = ttk.Button(analytics_frame, text="🔍 Pattern Analysis",
+                                             command=lambda: self._on_run_report("time_pattern_analysis"),
+                                             state="disabled")
+        self.pattern_analysis_btn.pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.stability_insights_btn = ttk.Button(analytics_frame, text="💡 Stability Insights",
+                                               command=lambda: self._on_run_report("stability_insights"),
+                                               state="disabled")
+        self.stability_insights_btn.pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.data_quality_report_btn = ttk.Button(analytics_frame, text="📊 Quality Report",
+                                                command=lambda: self._on_run_report("data_quality_report"),
+                                                state="disabled")
+        self.data_quality_report_btn.pack(side=tk.LEFT)
     
     def _create_results_panel(self):
         """Create the results display panel"""
@@ -682,7 +711,10 @@ class MainWindow:
             self.hotspots_btn, self.scorecard_btn, self.green_btn, 
             self.franchise_btn, self.equipment_btn, self.repeat_btn,
             self.resolution_btn, self.workload_btn, self.incident_details_btn,
-            self.drill_down_btn, self.export_filtered_btn
+            self.drill_down_btn, self.export_filtered_btn,
+            # Phase 2 analytics buttons
+            self.stability_dashboard_btn, self.pattern_analysis_btn,
+            self.stability_insights_btn, self.data_quality_report_btn
         ]
         
         for btn in report_buttons:
@@ -691,3 +723,7 @@ class MainWindow:
     def data_loaded(self, loaded: bool):
         """Update UI when data is loaded/unloaded"""
         self._update_ui_state(loaded)
+    
+    def get_quality_tab(self):
+        """Get reference to quality management tab"""
+        return self.quality_tab

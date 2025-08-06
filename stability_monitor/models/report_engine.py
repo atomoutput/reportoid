@@ -5,6 +5,8 @@ Report generation engine
 import pandas as pd
 from typing import Dict, List, Tuple, Any
 from datetime import datetime, timedelta
+from ..utils.stability_analytics import SystemStabilityAnalyzer, StabilityMetrics
+from ..utils.pattern_recognition import TimePatternEngine
 
 class ReportEngine:
     """Generates various stability reports from ticket data"""
@@ -13,6 +15,10 @@ class ReportEngine:
         self.settings = settings
         self.critical_threshold = settings.get("reports.critical_threshold", 2)
         self.mttr_targets = settings.get("reports.mttr_targets", {})
+        
+        # Initialize analytics engines
+        self.stability_analyzer = SystemStabilityAnalyzer(settings)
+        self.pattern_engine = TimePatternEngine(settings)
     
     def generate_critical_hotspots_report(self, df: pd.DataFrame) -> Tuple[List[List], List[str]]:
         """
@@ -621,4 +627,501 @@ class ReportEngine:
             ])
         
         columns = ["Week", "New Tickets", "Critical", "Critical %", "Resolved", "Resolution %", "Backlog Change", "Peak Day"]
+        return results, columns
+    
+    def generate_data_quality_report(self, quality_report: Dict[str, Any], 
+                                   duplicate_groups: List = None) -> Tuple[List[List], List[str]]:
+        """
+        Generate Data Quality Analysis Report
+        Shows data quality metrics and duplicate detection results
+        """
+        if not quality_report:
+            return [], ["Metric", "Value", "Status", "Recommendation"]
+        
+        results = []
+        
+        # Overall quality score
+        quality_score = quality_report.get("data_quality_score", 0)
+        status = "🟢 Excellent" if quality_score >= 90 else "🟡 Good" if quality_score >= 75 else "🔴 Needs Attention"
+        results.append([
+            "Overall Data Quality Score",
+            f"{quality_score:.1f}%",
+            status,
+            "Monitor and maintain" if quality_score >= 90 else "Review quality issues"
+        ])
+        
+        # Site filtering results
+        site_filtering = quality_report.get("site_filtering", {})
+        if site_filtering.get("removed_count", 0) > 0:
+            results.append([
+                "Site Filtering",
+                f"{site_filtering['removed_count']} tickets filtered out",
+                "🔵 Applied",
+                f"Removed {site_filtering['sites_removed']} non-Wendy's sites"
+            ])
+        else:
+            results.append([
+                "Site Filtering",
+                "No tickets filtered",
+                "🔵 Applied",
+                "All sites match filter criteria"
+            ])
+        
+        # Duplicate analysis
+        dup_analysis = quality_report.get("duplicate_analysis", {})
+        dup_groups = dup_analysis.get("total_duplicate_groups", 0)
+        
+        if dup_groups > 0:
+            status = "🟡 Review Required" if dup_analysis.get("manual_review_required", 0) > 0 else "🟢 Auto-handled"
+            results.append([
+                "Duplicate Detection",
+                f"{dup_groups} duplicate groups found",
+                status,
+                f"Review {dup_analysis.get('manual_review_required', 0)} groups manually"
+            ])
+            
+            # High confidence duplicates
+            high_confidence = dup_analysis.get("high_confidence_groups", 0)
+            if high_confidence > 0:
+                results.append([
+                    "High Confidence Duplicates",
+                    f"{high_confidence} groups",
+                    "🟢 Auto-mergeable",
+                    "Can be automatically processed"
+                ])
+        else:
+            results.append([
+                "Duplicate Detection",
+                "No duplicates detected",
+                "🟢 Clean",
+                "Data appears to have no duplicates"
+            ])
+        
+        # Data completeness
+        original_data = quality_report.get("original_dataset", {})
+        results.append([
+            "Dataset Size",
+            f"{original_data.get('total_tickets', 0)} tickets",
+            "🔵 Info",
+            f"Spanning {original_data.get('unique_sites', 0)} unique sites"
+        ])
+        
+        # Add recommendations summary
+        recommendations = quality_report.get("recommendations", [])
+        if recommendations:
+            results.append([
+                "Key Recommendations",
+                f"{len(recommendations)} items",
+                "🔵 Action Required",
+                "; ".join(recommendations[:2])  # Show first 2 recommendations
+            ])
+        
+        columns = ["Metric", "Value", "Status", "Recommendation"]
+        return results, columns
+    
+    def generate_duplicate_review_report(self, duplicate_groups: List) -> Tuple[List[List], List[str]]:
+        """
+        Generate Duplicate Review Report for manual processing
+        Shows detailed duplicate groups requiring review
+        """
+        if not duplicate_groups:
+            return [], ["Group ID", "Primary Ticket", "Duplicate Tickets", "Confidence", "Site", "Created Date", "Action Required"]
+        
+        results = []
+        
+        for idx, group in enumerate(duplicate_groups):
+            primary = group.primary_ticket
+            duplicates = group.duplicates
+            
+            # Format ticket numbers
+            primary_number = str(primary.get('Number', 'N/A'))
+            duplicate_numbers = ', '.join([str(dup.get('Number', 'N/A')) for dup in duplicates])
+            
+            # Determine action required
+            confidence = group.confidence_score
+            if confidence >= 0.95:
+                action = "🤖 Auto-merge recommended"
+            elif confidence >= 0.7:
+                action = "👁️ Manual review required"
+            else:
+                action = "❓ Low confidence - verify"
+            
+            # Format creation date
+            created_date = primary.get('Created', pd.NaT)
+            date_str = created_date.strftime("%Y-%m-%d") if pd.notna(created_date) else "N/A"
+            
+            results.append([
+                f"Group {idx + 1}",
+                primary_number,
+                duplicate_numbers,
+                f"{confidence:.1%}",
+                primary.get('Site', 'N/A'),
+                date_str,
+                action
+            ])
+        
+        columns = ["Group ID", "Primary Ticket", "Duplicate Tickets", "Confidence", "Site", "Created Date", "Action Required"]
+        return results, columns
+    
+    def generate_system_stability_dashboard(self, df: pd.DataFrame) -> Tuple[List[List], List[str]]:
+        """
+        Generate System Stability Dashboard Report
+        Shows overall system health metrics and benchmarks
+        """
+        if df.empty:
+            return [], ["Metric", "Current Value", "Target/Benchmark", "Status", "Trend"]
+        
+        # Calculate stability metrics
+        stability_metrics = self.stability_analyzer.calculate_system_stability(df)
+        
+        results = []
+        
+        # Overall Stability Percentage
+        stability_status = "🟢 Excellent" if stability_metrics.overall_stability_percentage >= 95 else \
+                          "🟡 Good" if stability_metrics.overall_stability_percentage >= 85 else \
+                          "🔴 Needs Attention"
+        
+        results.append([
+            "Overall System Stability",
+            f"{stability_metrics.overall_stability_percentage:.1f}%",
+            "≥95% (Excellent)",
+            stability_status,
+            "📈" if stability_metrics.stability_trend == "improving" else 
+            "📉" if stability_metrics.stability_trend == "declining" else "➡️"
+        ])
+        
+        # Weighted Stability Score
+        weighted_status = "🟢 Excellent" if stability_metrics.weighted_stability_score >= 95 else \
+                         "🟡 Good" if stability_metrics.weighted_stability_score >= 85 else \
+                         "🔴 Needs Attention"
+        
+        results.append([
+            "Volume-Weighted Stability",
+            f"{stability_metrics.weighted_stability_score:.1f}%",
+            "≥95% (Excellent)",
+            weighted_status,
+            "📊" if abs(stability_metrics.weighted_stability_score - stability_metrics.overall_stability_percentage) > 5 else "➡️"
+        ])
+        
+        # Critical Incident Rate
+        critical_target = 5.0  # Target: <5% critical incidents
+        critical_status = "🟢 Excellent" if stability_metrics.critical_incident_rate <= critical_target else \
+                         "🟡 Acceptable" if stability_metrics.critical_incident_rate <= critical_target * 2 else \
+                         "🔴 High"
+        
+        results.append([
+            "Critical Incident Rate",
+            f"{stability_metrics.critical_incident_rate:.1f}%",
+            f"≤{critical_target}% (Target)",
+            critical_status,
+            "⚠️" if stability_metrics.critical_incident_rate > critical_target else "✅"
+        ])
+        
+        # Mean Time to Recovery
+        if stability_metrics.mean_time_to_recovery > 0:
+            mttr_target = 4.0  # Target: <4 hours
+            mttr_status = "🟢 Excellent" if stability_metrics.mean_time_to_recovery <= mttr_target else \
+                         "🟡 Acceptable" if stability_metrics.mean_time_to_recovery <= mttr_target * 2 else \
+                         "🔴 Slow"
+            
+            results.append([
+                "Mean Time to Recovery",
+                f"{stability_metrics.mean_time_to_recovery:.1f} hours",
+                f"≤{mttr_target}h (Target)",
+                mttr_status,
+                "⏱️" if stability_metrics.mean_time_to_recovery > mttr_target else "⚡"
+            ])
+        
+        # System Availability
+        availability_target = 99.5
+        availability_status = "🟢 Excellent" if stability_metrics.system_availability >= availability_target else \
+                             "🟡 Good" if stability_metrics.system_availability >= 99.0 else \
+                             "🔴 Poor"
+        
+        results.append([
+            "System Availability",
+            f"{stability_metrics.system_availability:.2f}%",
+            f"≥{availability_target}% (Target)",
+            availability_status,
+            "🎯" if stability_metrics.system_availability >= availability_target else "📉"
+        ])
+        
+        # Benchmark Score
+        benchmark_status = "🟢 Exceeds" if stability_metrics.benchmark_score >= 90 else \
+                          "🟡 Meets" if stability_metrics.benchmark_score >= 70 else \
+                          "🔴 Below"
+        
+        results.append([
+            "Industry Benchmark Score",
+            f"{stability_metrics.benchmark_score:.1f}/100",
+            "≥70 (Industry Standard)",
+            benchmark_status,
+            "🏆" if stability_metrics.benchmark_score >= 90 else "📊"
+        ])
+        
+        # Site Performance Distribution
+        if stability_metrics.site_performance_distribution:
+            dist = stability_metrics.site_performance_distribution.get("distribution", {})
+            excellent_pct = dist.get("excellent", {}).get("percentage", 0)
+            needs_attention_pct = dist.get("needs_attention", {}).get("percentage", 0)
+            
+            results.append([
+                "High-Performing Sites",
+                f"{excellent_pct:.1f}% (≥95% stable)",
+                "≥80% of sites",
+                "🟢 Good" if excellent_pct >= 80 else "🟡 Fair" if excellent_pct >= 60 else "🔴 Low",
+                "📈" if excellent_pct >= 80 else "📊"
+            ])
+            
+            if needs_attention_pct > 0:
+                results.append([
+                    "Sites Needing Attention", 
+                    f"{needs_attention_pct:.1f}% (<70% stable)",
+                    "≤10% of sites",
+                    "🔴 High" if needs_attention_pct > 20 else "🟡 Medium" if needs_attention_pct > 10 else "🟢 Low",
+                    "⚠️" if needs_attention_pct > 10 else "✅"
+                ])
+        
+        columns = ["Metric", "Current Value", "Target/Benchmark", "Status", "Trend"]
+        return results, columns
+    
+    def generate_time_pattern_analysis_report(self, df: pd.DataFrame) -> Tuple[List[List], List[str]]:
+        """
+        Generate Time Pattern Analysis Report
+        Shows temporal patterns, synchronized incidents, and correlations
+        """
+        if df.empty:
+            return [], ["Pattern Type", "Description", "Confidence", "Sites Affected", "Timeframe", "Recommendation"]
+        
+        # Analyze temporal patterns
+        pattern_results = self.pattern_engine.analyze_temporal_patterns(df)
+        
+        results = []
+        
+        # Synchronized Incidents
+        sync_incidents = pattern_results.get("synchronized_incidents", [])
+        for i, sync_event in enumerate(sync_incidents[:5]):  # Show top 5
+            results.append([
+                f"🔗 Synchronized Event {i+1}",
+                f"{sync_event.likely_root_cause} - {len(sync_event.sites)} sites affected",
+                f"{sync_event.correlation_score:.1%}",
+                f"{len(sync_event.sites)} sites",
+                sync_event.timestamp.strftime("%Y-%m-%d %H:%M") if hasattr(sync_event.timestamp, 'strftime') else str(sync_event.timestamp),
+                "Investigate common infrastructure"
+            ])
+        
+        # Site Correlations
+        correlations = pattern_results.get("time_correlation_matrix", {}).get("high_correlations", [])
+        for i, corr in enumerate(correlations[:5]):  # Show top 5
+            results.append([
+                f"📊 Site Correlation {i+1}",
+                f"{corr['site1']} ↔ {corr['site2']} ({corr['strength']} correlation)",
+                f"{corr['correlation']:.1%}",
+                "2 sites",
+                "Ongoing pattern",
+                "Review shared dependencies"
+            ])
+        
+        # Recurring Patterns
+        recurring_patterns = pattern_results.get("recurring_patterns", [])
+        for i, pattern in enumerate(recurring_patterns[:3]):  # Show top 3
+            results.append([
+                "🔄 Recurring Pattern",
+                pattern.description,
+                f"{pattern.confidence:.1%}",
+                f"{len(pattern.sites)} site{'s' if len(pattern.sites) > 1 else ''}",
+                f"{pattern.time_window[0].strftime('%Y-%m-%d')} to {pattern.time_window[1].strftime('%Y-%m-%d')}",
+                "Schedule preventive maintenance"
+            ])
+        
+        # Peak Time Analysis
+        peak_times = pattern_results.get("peak_incident_times", {})
+        if peak_times:
+            peak_hour = peak_times.get("peak_hour", {})
+            peak_day = peak_times.get("peak_day", {})
+            
+            if peak_hour.get("percentage", 0) > 10:
+                results.append([
+                    "⏰ Peak Hour Pattern",
+                    f"Most incidents at {peak_hour.get('hour', 0):02d}:00 ({peak_hour.get('percentage', 0):.1f}%)",
+                    "High",
+                    "All sites",
+                    "Daily pattern",
+                    "Review operations during peak hour"
+                ])
+            
+            if peak_day.get("percentage", 0) > 20:
+                results.append([
+                    "📅 Peak Day Pattern", 
+                    f"Most incidents on {peak_day.get('day', 'Unknown')}s ({peak_day.get('percentage', 0):.1f}%)",
+                    "High",
+                    "All sites", 
+                    "Weekly pattern",
+                    "Investigate day-specific factors"
+                ])
+        
+        # Seasonal Patterns
+        seasonal_patterns = pattern_results.get("seasonal_patterns", [])
+        for pattern in seasonal_patterns[:2]:  # Show top 2
+            results.append([
+                "🌊 Seasonal Pattern",
+                pattern.description,
+                f"{pattern.confidence:.1%}",
+                f"{len(pattern.sites)} sites",
+                "Annual/Monthly cycle",
+                "Plan seasonal capacity"
+            ])
+        
+        # Anomalies
+        anomalies = pattern_results.get("anomaly_detection", [])
+        for i, anomaly in enumerate(anomalies[:3]):  # Show top 3
+            if anomaly['type'] == 'volume_spike':
+                results.append([
+                    "📈 Volume Anomaly",
+                    f"Unusual spike on {anomaly['date']} ({anomaly['incident_count']} incidents)",
+                    "High",
+                    f"{anomaly['affected_sites']} sites",
+                    anomaly['date'],
+                    "Investigate root cause of spike"
+                ])
+        
+        if not results:
+            results.append([
+                "No Patterns Detected",
+                "No significant temporal patterns found in current data",
+                "N/A",
+                "N/A",
+                "N/A",
+                "Continue monitoring for patterns"
+            ])
+        
+        columns = ["Pattern Type", "Description", "Confidence", "Sites Affected", "Timeframe", "Recommendation"]
+        return results, columns
+    
+    def generate_stability_insights_report(self, df: pd.DataFrame) -> Tuple[List[List], List[str]]:
+        """
+        Generate Stability Insights Report
+        Combines stability metrics and pattern analysis for actionable insights
+        """
+        if df.empty:
+            return [], ["Insight Category", "Finding", "Impact Level", "Action Required", "Priority"]
+        
+        results = []
+        
+        # Get stability metrics and pattern analysis
+        stability_metrics = self.stability_analyzer.calculate_system_stability(df)
+        pattern_results = self.pattern_engine.analyze_temporal_patterns(df)
+        
+        # Generate stability insights
+        stability_insights = self.stability_analyzer.generate_stability_insights(stability_metrics)
+        
+        for insight in stability_insights[:5]:  # Top 5 stability insights
+            # Extract priority and impact from insight text
+            if "🔴" in insight or "critical" in insight.lower() or "immediate" in insight.lower():
+                priority = "🔴 High"
+                impact = "🔴 High"
+                action = "Immediate investigation required"
+            elif "🟡" in insight or "review" in insight.lower() or "attention" in insight.lower():
+                priority = "🟡 Medium"
+                impact = "🟡 Medium"
+                action = "Review and plan improvements"
+            else:
+                priority = "🟢 Low"
+                impact = "🟢 Low"  
+                action = "Continue monitoring"
+            
+            # Clean up insight text (remove emojis for category)
+            clean_insight = insight.replace("🟢", "").replace("🟡", "").replace("🔴", "").replace("⚠️", "").replace("✅", "").replace("📈", "").replace("📉", "").replace("➡️", "").replace("⏱️", "").replace("⚡", "").replace("🚨", "").replace("🎯", "").replace("🏆", "").replace("📊", "").strip()
+            
+            results.append([
+                "📊 System Stability",
+                clean_insight,
+                impact,
+                action,
+                priority
+            ])
+        
+        # Generate pattern insights
+        pattern_insights = pattern_results.get("pattern_insights", [])
+        
+        for insight in pattern_insights[:3]:  # Top 3 pattern insights
+            if "synchronized" in insight.lower() or "correlation" in insight.lower():
+                priority = "🟡 Medium"
+                impact = "🟡 Medium"
+                action = "Investigate shared dependencies"
+                category = "🔗 Pattern Analysis"
+            elif "peak" in insight.lower() or "recurring" in insight.lower():
+                priority = "🟢 Low"
+                impact = "🟢 Low"
+                action = "Optimize operations timing"
+                category = "⏰ Temporal Patterns"
+            else:
+                priority = "🟢 Low"
+                impact = "🟢 Low"
+                action = "Continue pattern monitoring"
+                category = "📈 Trend Analysis"
+            
+            # Clean up insight text
+            clean_insight = insight.replace("🔗", "").replace("📊", "").replace("⏰", "").replace("📅", "").replace("🔄", "").replace("🌊", "").replace("📈", "").replace("🎯", "").strip()
+            
+            results.append([
+                category,
+                clean_insight,
+                impact,
+                action,
+                priority
+            ])
+        
+        # Add site performance insights
+        if stability_metrics.site_performance_distribution:
+            dist = stability_metrics.site_performance_distribution.get("distribution", {})
+            needs_attention = dist.get("needs_attention", {}).get("count", 0)
+            
+            if needs_attention > 0:
+                results.append([
+                    "🏢 Site Performance",
+                    f"{needs_attention} sites performing below 70% stability threshold",
+                    "🟡 Medium",
+                    "Focus improvement efforts on underperforming sites",
+                    "🟡 Medium"
+                ])
+            
+            top_performers = stability_metrics.site_performance_distribution.get("top_performers", [])
+            if top_performers:
+                results.append([
+                    "🏆 Best Practices",
+                    f"Top performing sites: {', '.join(top_performers[:3])}",
+                    "🟢 Low",
+                    "Share best practices from high-performing sites",
+                    "🟢 Low"
+                ])
+        
+        # Add benchmark insights
+        if stability_metrics.benchmark_score < 70:
+            results.append([
+                "📊 Benchmark Performance",
+                f"Overall benchmark score ({stability_metrics.benchmark_score:.1f}/100) below industry standards",
+                "🔴 High",
+                "Implement improvement plan to meet industry benchmarks",
+                "🔴 High"
+            ])
+        elif stability_metrics.benchmark_score >= 90:
+            results.append([
+                "🏆 Performance Excellence",
+                f"Benchmark score ({stability_metrics.benchmark_score:.1f}/100) exceeds industry standards",
+                "🟢 Low",
+                "Maintain current excellence and share best practices",
+                "🟢 Low"
+            ])
+        
+        if not results:
+            results.append([
+                "✅ System Health",
+                "System appears to be operating normally with no major issues detected",
+                "🟢 Low",
+                "Continue regular monitoring",
+                "🟢 Low"
+            ])
+        
+        columns = ["Insight Category", "Finding", "Impact Level", "Action Required", "Priority"]
         return results, columns

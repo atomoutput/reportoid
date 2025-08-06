@@ -49,6 +49,49 @@ class Settings:
                     "Custom"
                 ]
             },
+            "data_quality": {
+                "site_filter": {
+                    "enabled": True,
+                    "required_keywords": ["wendy"],
+                    "case_sensitive": False,
+                    "filter_stats": True
+                },
+                "duplicate_detection": {
+                    "enabled": True,
+                    "similarity_threshold": 0.8,
+                    "date_window_hours": 24,
+                    "priority_levels": ["1 - Critical"],
+                    "description_weight": 0.4,
+                    "site_weight": 0.3,
+                    "date_weight": 0.2,
+                    "priority_weight": 0.1
+                },
+                "auto_review": {
+                    "high_confidence_threshold": 0.95,
+                    "require_manual_review_threshold": 0.7
+                }
+            },
+            "stability_analysis": {
+                "excellent_threshold": 95.0,
+                "good_threshold": 85.0,
+                "acceptable_threshold": 70.0,
+                "benchmark_targets": {
+                    "critical_rate_threshold": 5.0,
+                    "mttr_target_hours": 4.0,
+                    "availability_target": 99.5
+                },
+                "trend_analysis_days": 30,
+                "weight_by_volume": True
+            },
+            "pattern_analysis": {
+                "sync_time_window_minutes": 30,
+                "min_sites_for_sync": 2,
+                "correlation_threshold": 0.6,
+                "recurring_pattern_days": 7,
+                "seasonal_analysis_weeks": 12,
+                "cluster_epsilon": 0.5,
+                "min_incidents_for_pattern": 3
+            },
             "export": {
                 "default_format": "csv",
                 "include_filters_in_export": True,

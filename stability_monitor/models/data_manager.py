@@ -7,6 +7,7 @@ import os
 from typing import Dict, List, Optional, Tuple, Any
 from ..utils.date_parser import DateParser
 from ..utils.validators import DataValidator
+from ..utils.data_quality import DataQualityManager
 
 class DataManager:
     """Manages data loading, validation, and preprocessing"""
@@ -15,10 +16,13 @@ class DataManager:
         self.settings = settings
         self.data = None
         self.original_data = None
+        self.quality_data = None  # Data with quality flags
         self.date_parser = DateParser(settings.get("data.date_formats"))
         self.validator = DataValidator(settings.get("data.required_columns"))
+        self.quality_manager = DataQualityManager(settings)
         self.category_mapping = {}
         self.metadata = {}
+        self.quality_report = None
     
     def load_file(self, file_path: str, column_mapping: Dict[str, str] = None) -> Dict[str, Any]:
         """Load data from CSV or Excel file"""
@@ -47,21 +51,46 @@ class DataManager:
             # Process and clean data
             df = self._preprocess_data(df)
             
-            # Build category-subcategory mapping
-            self._build_category_mapping(df)
+            # Apply data quality management
+            df_filtered, filter_stats = self.quality_manager.apply_site_filter(df)
             
-            # Store processed data
-            self.data = df
+            # Generate quality report
+            self.quality_report = self.quality_manager.generate_quality_report(df_filtered)
+            
+            # Create quality-flagged data for analysis
+            self.quality_data = self.quality_manager.flag_potential_duplicates(df_filtered)
+            
+            # Build category-subcategory mapping
+            self._build_category_mapping(df_filtered)
+            
+            # Store processed data (clean data for reports)
+            self.data = df_filtered
             
             # Update metadata
-            self._update_metadata(df, file_path)
+            self._update_metadata(df_filtered, file_path)
             
-            # Add success info to validation results
-            validation_results["info"]["processed_records"] = len(df)
-            validation_results["info"]["date_range"] = self._get_date_range(df)
+            # Add success info to validation results with quality metrics
+            validation_results["info"]["processed_records"] = len(df_filtered)
+            validation_results["info"]["original_records"] = len(df)
+            validation_results["info"]["filtered_out"] = filter_stats["removed_count"]
+            validation_results["info"]["date_range"] = self._get_date_range(df_filtered)
             validation_results["info"]["categories"] = len(self.category_mapping)
-            validation_results["info"]["sites"] = df["Site"].nunique()
-            validation_results["info"]["companies"] = df["Company"].nunique()
+            validation_results["info"]["sites"] = df_filtered["Site"].nunique()
+            validation_results["info"]["companies"] = df_filtered["Company"].nunique()
+            validation_results["info"]["quality_score"] = self.quality_report["data_quality_score"]
+            
+            # Add quality warnings if needed
+            if filter_stats["removed_count"] > 0:
+                validation_results["warnings"].append(
+                    f"Site filter removed {filter_stats['removed_count']} tickets from "
+                    f"{filter_stats['sites_removed']} non-Wendy's sites"
+                )
+            
+            if self.quality_report["duplicate_analysis"]["total_duplicate_groups"] > 0:
+                dup_count = self.quality_report["duplicate_analysis"]["total_duplicate_groups"]
+                validation_results["warnings"].append(
+                    f"Detected {dup_count} potential duplicate groups requiring review"
+                )
             
             return validation_results
             
@@ -69,6 +98,62 @@ class DataManager:
             return {
                 "valid": False,
                 "errors": [f"Failed to load file: {str(e)}"],
+                "warnings": [],
+                "info": {},
+                "data_quality": {}
+            }
+    
+    def load_dataframe(self, df: pd.DataFrame, column_mapping: Dict[str, str] = None) -> Dict[str, Any]:
+        """Load data from a pandas DataFrame (used for testing)"""
+        try:
+            # Apply column mapping if provided
+            if column_mapping:
+                df = df.rename(columns=column_mapping)
+            
+            # Store original data
+            self.original_data = df.copy()
+            
+            # Validate data
+            validation_results = self.validator.validate_dataframe(df)
+            
+            if not validation_results["valid"]:
+                return validation_results
+            
+            # Preprocess data
+            self.data = self._preprocess_data(df)
+            
+            # Apply site filtering
+            filter_stats = self.quality_manager.apply_site_filtering(self.data)
+            self.data = filter_stats["filtered_data"]
+            
+            # Generate quality report
+            self.quality_report = self.quality_manager.generate_quality_report(self.data)
+            
+            # Update validation results with quality metrics
+            validation_results["info"]["total_records"] = len(self.data)
+            validation_results["info"]["original_records"] = len(self.original_data)
+            validation_results["info"]["filtered_records"] = filter_stats["removed_count"]
+            validation_results["info"]["quality_score"] = self.quality_report["data_quality_score"]
+            
+            # Add quality warnings if needed
+            if filter_stats["removed_count"] > 0:
+                validation_results["warnings"].append(
+                    f"Site filter removed {filter_stats['removed_count']} tickets from "
+                    f"{filter_stats['sites_removed']} non-Wendy's sites"
+                )
+            
+            if self.quality_report["duplicate_analysis"]["total_duplicate_groups"] > 0:
+                dup_count = self.quality_report["duplicate_analysis"]["total_duplicate_groups"]
+                validation_results["warnings"].append(
+                    f"Detected {dup_count} potential duplicate groups requiring review"
+                )
+            
+            return validation_results
+            
+        except Exception as e:
+            return {
+                "valid": False,
+                "errors": [f"Failed to load DataFrame: {str(e)}"],
                 "warnings": [],
                 "info": {},
                 "data_quality": {}
@@ -245,3 +330,54 @@ class DataManager:
         }
         
         return summary
+    
+    def get_quality_report(self) -> Dict[str, Any]:
+        """Get data quality report"""
+        return self.quality_report if self.quality_report else {}
+    
+    def get_duplicate_groups(self):
+        """Get detected duplicate groups for manual review"""
+        if not self.quality_data is None:
+            return self.quality_manager.detect_duplicates(self.data)
+        return []
+    
+    def get_quality_flagged_data(self) -> pd.DataFrame:
+        """Get data with quality flags for analysis"""
+        return self.quality_data if self.quality_data is not None else self.data
+    
+    def merge_duplicate_tickets(self, primary_ticket_id: str, duplicate_ticket_ids: List[str], 
+                              merge_notes: str = "") -> bool:
+        """
+        Mark tickets as duplicates and merge them (placeholder for future implementation)
+        """
+        # This will be expanded in Phase 3 with the manual review interface
+        # For now, just log the action
+        print(f"Merging duplicates: {primary_ticket_id} <- {duplicate_ticket_ids}")
+        print(f"Notes: {merge_notes}")
+        
+        # Update quality data to reflect the merge
+        if self.quality_data is not None:
+            for dup_id in duplicate_ticket_ids:
+                mask = self.quality_data['Number'].astype(str) == str(dup_id)
+                if mask.any():
+                    self.quality_data.loc[mask, 'Duplicate_Flag'] = 'Merged Duplicate'
+                    self.quality_data.loc[mask, 'Duplicate_Confidence'] = 1.0
+        
+        return True
+    
+    def dismiss_duplicate_group(self, ticket_ids: List[str], dismiss_notes: str = "") -> bool:
+        """
+        Dismiss a group of tickets as not duplicates
+        """
+        print(f"Dismissing duplicate group: {ticket_ids}")
+        print(f"Notes: {dismiss_notes}")
+        
+        # Update quality data to reflect the dismissal
+        if self.quality_data is not None:
+            for ticket_id in ticket_ids:
+                mask = self.quality_data['Number'].astype(str) == str(ticket_id)
+                if mask.any():
+                    self.quality_data.loc[mask, 'Duplicate_Flag'] = 'Dismissed'
+                    self.quality_data.loc[mask, 'Duplicate_Confidence'] = 0.0
+        
+        return True

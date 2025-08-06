@@ -6,10 +6,13 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 import pandas as pd
 from typing import Dict, Any
+import uuid
+from datetime import datetime
 
 from ..models.data_manager import DataManager
 from ..models.report_engine import ReportEngine
 from ..views.main_window import MainWindow
+from ..utils.audit_trail import AuditTrailManager, AuditAction
 
 class AppController:
     """Main application controller - coordinates between models and views"""
@@ -21,6 +24,7 @@ class AppController:
         # Initialize models
         self.data_manager = DataManager(settings)
         self.report_engine = ReportEngine(settings)
+        self.audit_manager = AuditTrailManager(settings)
         
         # Initialize view
         self.main_window = MainWindow(root, settings)
@@ -46,6 +50,16 @@ class AppController:
         self.main_window.set_callback('drill_down', self._handle_drill_down)
         self.main_window.set_callback('export_filtered_data', self._handle_export_filtered_data)
         self.main_window.set_callback('export_comprehensive', self._handle_export_comprehensive)
+        
+        # Set up quality management callbacks
+        quality_tab = self.main_window.get_quality_tab()
+        quality_tab.set_callback('refresh_quality', self._handle_refresh_quality)
+        quality_tab.set_callback('auto_process_duplicates', self._handle_auto_process_duplicates)
+        quality_tab.set_callback('export_audit_log', self._handle_export_audit_log)
+        quality_tab.set_callback('review_duplicate_group', self._handle_review_duplicate_group)
+        quality_tab.set_callback('batch_process_duplicates', self._handle_batch_process_duplicates)
+        quality_tab.set_callback('get_duplicate_queue', self._handle_get_duplicate_queue)
+        quality_tab.set_callback('get_audit_trail', self._handle_get_audit_trail)
     
     def _handle_load_data(self):
         """Handle data loading from file"""
@@ -91,6 +105,12 @@ class AppController:
             # Update UI with loaded data
             self._update_ui_state(data_loaded=True)
             self._update_filter_options()
+            
+            # Update quality tab with quality report
+            quality_report = self.data_manager.get_quality_report()
+            if quality_report:
+                quality_tab = self.main_window.get_quality_tab()
+                quality_tab.update_quality_metrics(quality_report)
             
             # Show data summary
             info = result["info"]
@@ -265,7 +285,12 @@ class AppController:
                 "incident_details": "Incident Details - Individual Tickets",
                 "repeat_offenders": "Repeat Offenders - Recurring Issues",
                 "resolution_tracking": "Resolution Tracking - SLA Performance",
-                "workload_trends": "Workload Trends - Volume Patterns"
+                "workload_trends": "Workload Trends - Volume Patterns",
+                # Phase 2: Advanced Analytics
+                "system_stability_dashboard": "System Stability Dashboard",
+                "time_pattern_analysis": "Time Pattern Analysis",
+                "stability_insights": "Stability Insights",
+                "data_quality_report": "Data Quality Report"
             }
             
             title = report_titles.get(report_type, report_type.replace('_', ' ').title())
@@ -298,6 +323,17 @@ class AppController:
             return self.report_engine.generate_resolution_tracking_report(data)
         elif report_type == "workload_trends":
             return self.report_engine.generate_workload_trends_report(data)
+        # Phase 2: Advanced Analytics Reports
+        elif report_type == "system_stability_dashboard":
+            return self.report_engine.generate_system_stability_dashboard(data)
+        elif report_type == "time_pattern_analysis":
+            return self.report_engine.generate_time_pattern_analysis_report(data)
+        elif report_type == "stability_insights":
+            return self.report_engine.generate_stability_insights_report(data)
+        elif report_type == "data_quality_report":
+            quality_report = self.data_manager.get_quality_report()
+            duplicate_groups = self.data_manager.get_duplicate_groups()
+            return self.report_engine.generate_data_quality_report(quality_report, duplicate_groups)
         else:
             # Placeholder for other report types
             return [], []
@@ -717,3 +753,319 @@ class AppController:
             active_filters.append(f"Subcategory: {filters['subcategory']}")
         
         return "\n".join(active_filters) if active_filters else "No filters applied"
+    
+    # Quality Management Event Handlers
+    def _handle_refresh_quality(self):
+        """Handle refresh quality analysis request"""
+        if self.data_manager.data is None:
+            messagebox.showwarning("No Data", "Please load data first.")
+            return
+        
+        try:
+            self.main_window.set_status("Refreshing quality analysis...")
+            
+            # Regenerate quality analysis
+            quality_report = self.data_manager.get_quality_report()
+            
+            if quality_report:
+                quality_tab = self.main_window.get_quality_tab()
+                quality_tab.update_quality_metrics(quality_report)
+                
+                self.main_window.set_status("Quality analysis refreshed")
+                messagebox.showinfo("Quality Analysis", "Quality analysis has been refreshed successfully!")
+            else:
+                messagebox.showwarning("Quality Analysis", "Unable to generate quality report.")
+                
+        except Exception as e:
+            messagebox.showerror("Quality Analysis Error", f"Failed to refresh quality analysis:\n{str(e)}")
+    
+    def _handle_auto_process_duplicates(self):
+        """Handle auto-processing of high confidence duplicates"""
+        try:
+            duplicate_groups = self.data_manager.get_duplicate_groups()
+            high_confidence_groups = [
+                group for group in duplicate_groups 
+                if group.confidence_score >= self.settings.get("data_quality.auto_review.high_confidence_threshold", 0.95)
+            ]
+            
+            if not high_confidence_groups:
+                messagebox.showinfo("Auto-Process", "No high-confidence duplicate groups found for automatic processing.")
+                return
+            
+            processed_count = 0
+            
+            for group in high_confidence_groups:
+                # Auto-merge high confidence duplicates
+                primary_ticket_id = str(group.primary_ticket.get("Number", "N/A"))
+                duplicate_ticket_ids = [str(dup.get("Number", "N/A")) for dup in group.duplicates]
+                
+                # Log audit action
+                action = AuditAction(
+                    action_id=str(uuid.uuid4()),
+                    action_type="merge_duplicates",
+                    user="system_auto",
+                    timestamp=datetime.now(),
+                    description=f"Auto-merged high confidence duplicates ({group.confidence_score:.1%} confidence)",
+                    details={
+                        "confidence_score": group.confidence_score,
+                        "auto_processed": True,
+                        "primary_ticket": primary_ticket_id,
+                        "merged_tickets": duplicate_ticket_ids
+                    },
+                    affected_tickets=[primary_ticket_id] + duplicate_ticket_ids
+                )
+                
+                if self.audit_manager.log_action(action):
+                    # Mark as processed in data manager
+                    self.data_manager.merge_duplicate_tickets(primary_ticket_id, duplicate_ticket_ids, 
+                                                            "Auto-processed by system (high confidence)")
+                    processed_count += 1
+            
+            if processed_count > 0:
+                # Refresh quality analysis
+                self._handle_refresh_quality()
+                
+                messagebox.showinfo("Auto-Process Complete", 
+                                  f"Successfully auto-processed {processed_count} high-confidence duplicate groups!")
+            
+        except Exception as e:
+            messagebox.showerror("Auto-Process Error", f"Failed to auto-process duplicates:\n{str(e)}")
+    
+    def _handle_export_audit_log(self):
+        """Handle export audit log request"""
+        try:
+            file_path = filedialog.asksaveasfilename(
+                title="Export Audit Log",
+                defaultextension=".csv",
+                filetypes=[
+                    ("CSV files", "*.csv"),
+                    ("JSON files", "*.json"),
+                    ("All files", "*.*")
+                ]
+            )
+            
+            if not file_path:
+                return
+            
+            # Determine format
+            format_type = "json" if file_path.lower().endswith('.json') else "csv"
+            
+            if self.audit_manager.export_audit_log(file_path, format_type):
+                messagebox.showinfo("Export Complete", f"Audit log exported successfully to:\n{file_path}")
+                self.main_window.set_status(f"Audit log exported to {file_path}")
+            else:
+                messagebox.showerror("Export Error", "Failed to export audit log.")
+                
+        except Exception as e:
+            messagebox.showerror("Export Error", f"Failed to export audit log:\n{str(e)}")
+    
+    def _handle_review_duplicate_group(self, group_id: str):
+        """Handle review of specific duplicate group"""
+        try:
+            # Find the duplicate group by ID  
+            duplicate_groups = self.data_manager.get_duplicate_groups()
+            
+            target_group = None
+            for i, group in enumerate(duplicate_groups):
+                if f"Group {i + 1}" == group_id:
+                    target_group = group
+                    break
+            
+            if not target_group:
+                messagebox.showwarning("Group Not Found", f"Duplicate group '{group_id}' not found.")
+                return
+            
+            # Show review dialog
+            quality_tab = self.main_window.get_quality_tab()
+            result = quality_tab.show_review_dialog(target_group)
+            
+            if result and result["action"] != "skip":
+                # Process the result
+                if result["action"] == "merge":
+                    # Log merge action
+                    action = AuditAction(
+                        action_id=str(uuid.uuid4()),
+                        action_type="merge_duplicates",
+                        user="manual_review",
+                        timestamp=datetime.now(),
+                        description=f"Manual review: Merged duplicates - {result['notes'][:100]}",
+                        details={
+                            "confidence_score": result["confidence"],
+                            "manual_review": True,
+                            "review_notes": result["notes"],
+                            "primary_ticket": result["primary_ticket_id"],
+                            "merged_tickets": result["duplicate_ticket_ids"]
+                        },
+                        affected_tickets=[result["primary_ticket_id"]] + result["duplicate_ticket_ids"]
+                    )
+                    
+                    if self.audit_manager.log_action(action):
+                        self.data_manager.merge_duplicate_tickets(
+                            result["primary_ticket_id"], 
+                            result["duplicate_ticket_ids"],
+                            result["notes"]
+                        )
+                        
+                        messagebox.showinfo("Merge Complete", "Duplicate tickets merged successfully!")
+                    
+                elif result["action"] == "dismiss":
+                    # Log dismiss action
+                    action = AuditAction(
+                        action_id=str(uuid.uuid4()),
+                        action_type="dismiss_duplicates",
+                        user="manual_review",
+                        timestamp=datetime.now(),
+                        description=f"Manual review: Dismissed as non-duplicates - {result['notes'][:100]}",
+                        details={
+                            "confidence_score": result["confidence"],
+                            "manual_review": True,
+                            "review_notes": result["notes"],
+                            "dismissed_tickets": result["ticket_ids"]
+                        },
+                        affected_tickets=result["ticket_ids"]
+                    )
+                    
+                    if self.audit_manager.log_action(action):
+                        self.data_manager.dismiss_duplicate_group(result["ticket_ids"], result["notes"])
+                        
+                        messagebox.showinfo("Dismiss Complete", "Duplicate group dismissed successfully!")
+                
+                # Refresh quality analysis after changes
+                self._handle_refresh_quality()
+                
+        except Exception as e:
+            messagebox.showerror("Review Error", f"Failed to review duplicate group:\n{str(e)}")
+    
+    def _handle_batch_process_duplicates(self, group_ids: List[str]):
+        """Handle batch processing of multiple duplicate groups"""
+        try:
+            processed_count = 0
+            failed_count = 0
+            
+            for group_id in group_ids:
+                try:
+                    # For batch processing, auto-merge groups above threshold
+                    duplicate_groups = self.data_manager.get_duplicate_groups()
+                    
+                    target_group = None
+                    for i, group in enumerate(duplicate_groups):
+                        if f"Group {i + 1}" == group_id:
+                            target_group = group
+                            break
+                    
+                    if target_group and target_group.confidence_score >= 0.8:  # Batch process threshold
+                        primary_ticket_id = str(target_group.primary_ticket.get("Number", "N/A"))
+                        duplicate_ticket_ids = [str(dup.get("Number", "N/A")) for dup in target_group.duplicates]
+                        
+                        # Log batch action
+                        action = AuditAction(
+                            action_id=str(uuid.uuid4()),
+                            action_type="merge_duplicates",
+                            user="batch_process",
+                            timestamp=datetime.now(),
+                            description=f"Batch processed: Merged duplicates ({target_group.confidence_score:.1%} confidence)",
+                            details={
+                                "confidence_score": target_group.confidence_score,
+                                "batch_processed": True,
+                                "primary_ticket": primary_ticket_id,
+                                "merged_tickets": duplicate_ticket_ids
+                            },
+                            affected_tickets=[primary_ticket_id] + duplicate_ticket_ids
+                        )
+                        
+                        if self.audit_manager.log_action(action):
+                            self.data_manager.merge_duplicate_tickets(primary_ticket_id, duplicate_ticket_ids, 
+                                                                    f"Batch processed (confidence: {target_group.confidence_score:.1%})")
+                            processed_count += 1
+                        else:
+                            failed_count += 1
+                    else:
+                        failed_count += 1
+                        
+                except Exception:
+                    failed_count += 1
+            
+            # Show results
+            if processed_count > 0 or failed_count > 0:
+                result_msg = f"Batch processing complete!\n\nProcessed: {processed_count}\nFailed: {failed_count}"
+                
+                if processed_count > 0:
+                    # Refresh quality analysis
+                    self._handle_refresh_quality()
+                
+                messagebox.showinfo("Batch Process Complete", result_msg)
+                
+        except Exception as e:
+            messagebox.showerror("Batch Process Error", f"Failed to batch process duplicates:\n{str(e)}")
+    
+    def _handle_get_duplicate_queue(self, filter_type: str) -> List[List]:
+        """Get duplicate queue data for display"""
+        try:
+            duplicate_groups = self.data_manager.get_duplicate_groups()
+            
+            # Filter based on type
+            filtered_groups = []
+            
+            for i, group in enumerate(duplicate_groups):
+                if filter_type == "High Confidence" and group.confidence_score < 0.9:
+                    continue
+                elif filter_type == "Manual Review Required" and (group.confidence_score < 0.7 or group.confidence_score >= 0.95):
+                    continue
+                elif filter_type == "Low Confidence" and group.confidence_score >= 0.7:
+                    continue
+                
+                # Format for display
+                primary_ticket = group.primary_ticket
+                duplicate_tickets = group.duplicates
+                
+                group_data = [
+                    f"Group {i + 1}",
+                    str(primary_ticket.get("Number", "N/A")),
+                    ", ".join([str(dup.get("Number", "N/A")) for dup in duplicate_tickets]),
+                    f"{group.confidence_score:.1%}",
+                    primary_ticket.get("Site", "N/A"),
+                    primary_ticket.get("Created").strftime("%Y-%m-%d") if hasattr(primary_ticket.get("Created"), 'strftime') else "N/A",
+                    getattr(group, 'review_status', 'pending').title(),
+                    "🤖 Auto-merge" if group.confidence_score >= 0.95 else "👁️ Review" if group.confidence_score >= 0.7 else "❓ Low confidence"
+                ]
+                
+                filtered_groups.append(group_data)
+            
+            return filtered_groups
+            
+        except Exception as e:
+            messagebox.showerror("Queue Error", f"Failed to get duplicate queue:\n{str(e)}")
+            return []
+    
+    def _handle_get_audit_trail(self, filter_type: str) -> List[List]:
+        """Get audit trail data for display"""
+        try:
+            # Map filter types to action types
+            action_type_map = {
+                "All Actions": None,
+                "Merge Duplicates": "merge_duplicates",
+                "Dismiss Duplicates": "dismiss_duplicates", 
+                "Manual Corrections": "manual_correction",
+                "Reversals": "reversal"
+            }
+            
+            action_type = action_type_map.get(filter_type)
+            actions = self.audit_manager.get_audit_history(limit=100, action_type=action_type)
+            
+            audit_data = []
+            for action in actions:
+                audit_row = [
+                    action.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                    action.action_type.replace("_", " ").title(),
+                    action.user,
+                    action.description[:80] + ("..." if len(action.description) > 80 else ""),
+                    ", ".join(action.affected_tickets[:3]) + ("..." if len(action.affected_tickets) > 3 else ""),
+                    "Reversed" if getattr(action, 'reversed', False) else "Active"
+                ]
+                audit_data.append(audit_row)
+            
+            return audit_data
+            
+        except Exception as e:
+            messagebox.showerror("Audit Trail Error", f"Failed to get audit trail:\n{str(e)}")
+            return []
