@@ -90,6 +90,19 @@ def test_reports(data_manager):
         print(f"  - Columns: {columns}")
         print(f"  - Sample ticket: {results[0][1]} - {results[0][2][:30]}...")
     
+    # Test new reports
+    print("Testing Repeat Offenders report...")
+    results, columns = report_engine.generate_repeat_offenders_report(data_manager.data)
+    print(f"  - Found {len(results)} repeat offender patterns")
+    
+    print("Testing Resolution Tracking report...")
+    results, columns = report_engine.generate_resolution_tracking_report(data_manager.data)
+    print(f"  - Found {len(results)} SLA violations")
+    
+    print("Testing Workload Trends report...")
+    results, columns = report_engine.generate_workload_trends_report(data_manager.data)
+    print(f"  - Found {len(results)} weekly trend periods")
+    
     print("✓ All reports tested successfully!")
 
 def test_filtering(data_manager):

@@ -261,7 +261,10 @@ class AppController:
                 "green_list": "Green List - Stable Operations",
                 "franchise_overview": "Franchise Performance Overview",
                 "equipment_analysis": "Equipment Category Analysis",
-                "incident_details": "Incident Details - Individual Tickets"
+                "incident_details": "Incident Details - Individual Tickets",
+                "repeat_offenders": "Repeat Offenders - Recurring Issues",
+                "resolution_tracking": "Resolution Tracking - SLA Performance",
+                "workload_trends": "Workload Trends - Volume Patterns"
             }
             
             title = report_titles.get(report_type, report_type.replace('_', ' ').title())
@@ -288,6 +291,12 @@ class AppController:
             return self.report_engine.generate_equipment_analysis_report(data)
         elif report_type == "incident_details":
             return self.report_engine.generate_incident_details_report(data)
+        elif report_type == "repeat_offenders":
+            return self.report_engine.generate_repeat_offenders_report(data)
+        elif report_type == "resolution_tracking":
+            return self.report_engine.generate_resolution_tracking_report(data)
+        elif report_type == "workload_trends":
+            return self.report_engine.generate_workload_trends_report(data)
         else:
             # Placeholder for other report types
             return [], []

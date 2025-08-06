@@ -68,10 +68,20 @@ class DataValidator:
         # Date validation info
         for date_col in ["Created", "Resolved"]:
             if date_col in df.columns:
-                valid_dates = pd.to_datetime(df[date_col], errors='coerce').notna().sum()
-                invalid_dates = total_rows - valid_dates
-                if invalid_dates > 0:
-                    results["warnings"].append(f"Column '{date_col}' has {invalid_dates} invalid date formats")
+                # For "Resolved", empty values are legitimate (open tickets)
+                if date_col == "Resolved":
+                    non_empty_values = df[date_col].dropna()
+                    if len(non_empty_values) > 0:
+                        valid_dates = pd.to_datetime(non_empty_values, errors='coerce').notna().sum()
+                        invalid_dates = len(non_empty_values) - valid_dates
+                        if invalid_dates > 0:
+                            results["warnings"].append(f"Column '{date_col}' has {invalid_dates} invalid date formats (excluding legitimately empty values)")
+                else:
+                    # For "Created", all rows should have dates
+                    valid_dates = pd.to_datetime(df[date_col], errors='coerce').notna().sum()
+                    invalid_dates = total_rows - valid_dates
+                    if invalid_dates > 0:
+                        results["warnings"].append(f"Column '{date_col}' has {invalid_dates} invalid date formats")
         
         return results
     
