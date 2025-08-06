@@ -26,7 +26,7 @@ class ReportEngine:
         critical_df = df[df["Priority"] == "1 - Critical"].copy()
         
         if critical_df.empty:
-            return [], ["Site", "Company", "Critical Count", "Latest Incident", "Days Since Last"]
+            return [], ["Site", "Company", "Critical Count", "Latest Incident", "Days Since Last", "All Critical Tickets"]
         
         # Group by site and company
         grouped = critical_df.groupby(["Site", "Company"]).agg({
@@ -41,7 +41,7 @@ class ReportEngine:
         hotspots = grouped[grouped["Critical_Count"] >= self.critical_threshold].copy()
         
         if hotspots.empty:
-            return [], ["Site", "Company", "Critical Count", "Latest Incident", "Days Since Last"]
+            return [], ["Site", "Company", "Critical Count", "Latest Incident", "Days Since Last", "All Critical Tickets"]
         
         # Calculate days since last critical incident
         now = pd.Timestamp.now()
@@ -51,18 +51,16 @@ class ReportEngine:
         hotspots = hotspots.sort_values(["Critical_Count", "Latest_Incident"], 
                                        ascending=[False, False])
         
-        # Format for display with sample tickets
+        # Format for display with ALL critical tickets
         results = []
         for _, row in hotspots.iterrows():
             site_name = row["Site"]
             
-            # Get sample critical tickets for this site
-            site_critical_tickets = critical_df[critical_df["Site"] == site_name]["Number"].dropna().head(3).tolist()
-            sample_tickets = ", ".join([str(t) for t in site_critical_tickets])
-            if len(site_critical_tickets) == 3 and len(critical_df[critical_df["Site"] == site_name]) > 3:
-                sample_tickets += " (+more)"
-            elif not sample_tickets:
-                sample_tickets = "No ticket #s"
+            # Get ALL critical tickets for this site
+            site_critical_tickets = critical_df[critical_df["Site"] == site_name]["Number"].dropna().tolist()
+            all_tickets = ", ".join([str(t) for t in site_critical_tickets])
+            if not all_tickets:
+                all_tickets = "No ticket #s"
             
             results.append([
                 row["Site"],
@@ -70,10 +68,10 @@ class ReportEngine:
                 int(row["Critical_Count"]),
                 row["Latest_Incident"].strftime("%Y-%m-%d %H:%M") if pd.notna(row["Latest_Incident"]) else "N/A",
                 int(row["Days_Since_Last"]) if pd.notna(row["Days_Since_Last"]) else "N/A",
-                sample_tickets
+                all_tickets
             ])
         
-        columns = ["Site", "Company", "Critical Count", "Latest Incident", "Days Since Last", "Sample Tickets"]
+        columns = ["Site", "Company", "Critical Count", "Latest Incident", "Days Since Last", "All Critical Tickets"]
         return results, columns
     
     def generate_site_scorecard_report(self, df: pd.DataFrame) -> Tuple[List[List], List[str]]:

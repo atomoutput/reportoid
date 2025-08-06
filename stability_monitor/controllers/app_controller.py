@@ -45,6 +45,7 @@ class AppController:
         self.main_window.set_callback('settings', self._handle_settings)
         self.main_window.set_callback('drill_down', self._handle_drill_down)
         self.main_window.set_callback('export_filtered_data', self._handle_export_filtered_data)
+        self.main_window.set_callback('export_comprehensive', self._handle_export_comprehensive)
     
     def _handle_load_data(self):
         """Handle data loading from file"""
@@ -528,3 +529,191 @@ class AppController:
             
         except Exception as e:
             messagebox.showerror("Export Error", f"Failed to export filtered data:\n{str(e)}")
+    
+    def _handle_export_comprehensive(self):
+        """Handle comprehensive Excel export with all reports in separate sheets"""
+        try:
+            if self.data_manager.data is None:
+                messagebox.showwarning("No Data", "Please load data first.")
+                return
+            
+            # Get file path for export (Excel only)
+            file_path = filedialog.asksaveasfilename(
+                title="Export Comprehensive Report",
+                defaultextension=".xlsx",
+                filetypes=[("Excel files", "*.xlsx")]
+            )
+            
+            if not file_path:
+                return
+            
+            # Show progress
+            self.main_window.set_status("Generating comprehensive report...")
+            self.main_window.show_progress(True, 0)
+            self.root.update()
+            
+            # Get current filters
+            filters = self.main_window.get_current_filters()
+            filtered_data = self.data_manager.apply_filters(filters)
+            
+            if filtered_data.empty:
+                messagebox.showwarning("No Data", "No data matches the current filters.")
+                self.main_window.show_progress(False)
+                return
+            
+            # Create Excel writer
+            with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
+                
+                # Sheet 1: Summary Overview
+                self.main_window.show_progress(True, 10)
+                self.root.update()
+                summary_data = self._create_summary_sheet(filtered_data)
+                summary_df = pd.DataFrame(summary_data)
+                summary_df.to_excel(writer, sheet_name='Summary', index=False)
+                
+                # Sheet 2: Critical Hotspots
+                self.main_window.show_progress(True, 20)
+                self.root.update()
+                results, columns = self.report_engine.generate_critical_hotspots_report(filtered_data)
+                if results:
+                    hotspots_df = pd.DataFrame(results, columns=columns)
+                    hotspots_df.to_excel(writer, sheet_name='Critical Hotspots', index=False)
+                
+                # Sheet 3: Site Scorecard
+                self.main_window.show_progress(True, 30)
+                self.root.update()
+                results, columns = self.report_engine.generate_site_scorecard_report(filtered_data)
+                if results:
+                    scorecard_df = pd.DataFrame(results, columns=columns)
+                    scorecard_df.to_excel(writer, sheet_name='Site Scorecard', index=False)
+                
+                # Sheet 4: Green List
+                self.main_window.show_progress(True, 40)
+                self.root.update()
+                results, columns = self.report_engine.generate_green_list_report(filtered_data)
+                if results:
+                    green_df = pd.DataFrame(results, columns=columns)
+                    green_df.to_excel(writer, sheet_name='Green List', index=False)
+                
+                # Sheet 5: Franchise Overview
+                self.main_window.show_progress(True, 50)
+                self.root.update()
+                results, columns = self.report_engine.generate_franchise_overview_report(filtered_data)
+                if results:
+                    franchise_df = pd.DataFrame(results, columns=columns)
+                    franchise_df.to_excel(writer, sheet_name='Franchise Overview', index=False)
+                
+                # Sheet 6: Equipment Analysis
+                self.main_window.show_progress(True, 60)
+                self.root.update()
+                results, columns = self.report_engine.generate_equipment_analysis_report(filtered_data)
+                if results:
+                    equipment_df = pd.DataFrame(results, columns=columns)
+                    equipment_df.to_excel(writer, sheet_name='Equipment Analysis', index=False)
+                
+                # Sheet 7: Repeat Offenders
+                self.main_window.show_progress(True, 70)
+                self.root.update()
+                results, columns = self.report_engine.generate_repeat_offenders_report(filtered_data)
+                if results:
+                    repeat_df = pd.DataFrame(results, columns=columns)
+                    repeat_df.to_excel(writer, sheet_name='Repeat Offenders', index=False)
+                
+                # Sheet 8: Resolution Tracking
+                self.main_window.show_progress(True, 80)
+                self.root.update()
+                results, columns = self.report_engine.generate_resolution_tracking_report(filtered_data)
+                if results:
+                    resolution_df = pd.DataFrame(results, columns=columns)
+                    resolution_df.to_excel(writer, sheet_name='Resolution Tracking', index=False)
+                
+                # Sheet 9: Workload Trends
+                self.main_window.show_progress(True, 85)
+                self.root.update()
+                results, columns = self.report_engine.generate_workload_trends_report(filtered_data)
+                if results:
+                    workload_df = pd.DataFrame(results, columns=columns)
+                    workload_df.to_excel(writer, sheet_name='Workload Trends', index=False)
+                
+                # Sheet 10: Individual Tickets (Full Details)
+                self.main_window.show_progress(True, 90)
+                self.root.update()
+                results, columns = self.report_engine.generate_incident_details_report(filtered_data)
+                if results:
+                    incidents_df = pd.DataFrame(results, columns=columns)
+                    incidents_df.to_excel(writer, sheet_name='All Tickets', index=False)
+                
+                # Sheet 11: Raw Data (Filtered)
+                self.main_window.show_progress(True, 95)
+                self.root.update()
+                raw_data = filtered_data.copy()
+                # Remove internal calculated columns
+                internal_columns = ["Is_Critical", "Is_Resolved", "Resolution_Hours", "Days_Since_Created"]
+                for col in internal_columns:
+                    if col in raw_data.columns:
+                        raw_data = raw_data.drop(columns=[col])
+                raw_data.to_excel(writer, sheet_name='Raw Data', index=False)
+            
+            self.main_window.show_progress(False)
+            self.main_window.set_status(f"Comprehensive report exported to {file_path}")
+            
+            # Show completion message
+            active_filters = self._get_active_filters_summary(filters)
+            messagebox.showinfo("Export Complete", 
+                              f"Comprehensive report exported successfully!\n\n"
+                              f"File: {file_path}\n"
+                              f"Records analyzed: {len(filtered_data)}\n"
+                              f"Sheets created: 11 (Summary + 10 report types)\n\n"
+                              f"Applied filters:\n{active_filters}")
+            
+        except Exception as e:
+            self.main_window.show_progress(False)
+            self.main_window.set_status("Error exporting comprehensive report")
+            messagebox.showerror("Export Error", f"Failed to export comprehensive report:\n{str(e)}")
+    
+    def _create_summary_sheet(self, df: pd.DataFrame) -> list:
+        """Create summary data for the Excel export"""
+        summary = self.report_engine.get_report_summary(df)
+        
+        summary_data = [
+            ["Metric", "Value"],
+            ["Report Generated", pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")],
+            ["Total Records", summary.get("total_tickets", 0)],
+            ["Critical Incidents", summary.get("critical_tickets", 0)],
+            ["Critical Percentage", f"{summary.get('critical_percentage', 0)}%"],
+            ["Resolved Tickets", summary.get("resolved_tickets", 0)],
+            ["Resolution Rate", f"{summary.get('resolution_rate', 0)}%"],
+            ["Open Tickets", summary.get("total_tickets", 0) - summary.get("resolved_tickets", 0)],
+            ["Unique Sites", summary.get("unique_sites", 0)],
+            ["Unique Companies", summary.get("unique_companies", 0)],
+            ["Average Resolution Time (hours)", summary.get("avg_mttr_hours", "N/A")]
+        ]
+        
+        if summary.get("date_range"):
+            date_range = summary["date_range"]
+            if "start" in date_range and date_range["start"]:
+                summary_data.append(["Date Range Start", date_range["start"].strftime("%Y-%m-%d")])
+            if "end" in date_range and date_range["end"]:
+                summary_data.append(["Date Range End", date_range["end"].strftime("%Y-%m-%d")])
+        
+        return summary_data
+    
+    def _get_active_filters_summary(self, filters: dict) -> str:
+        """Get summary of active filters for export confirmation"""
+        active_filters = []
+        if filters.get("date_from"):
+            active_filters.append(f"Date from: {filters['date_from']}")
+        if filters.get("date_to"):
+            active_filters.append(f"Date to: {filters['date_to']}")
+        if filters.get("priorities"):
+            active_filters.append(f"Priorities: {', '.join(filters['priorities'])}")
+        if filters.get("company"):
+            active_filters.append(f"Company: {filters['company']}")
+        if filters.get("site"):
+            active_filters.append(f"Site: {filters['site']}")
+        if filters.get("category"):
+            active_filters.append(f"Category: {filters['category']}")
+        if filters.get("subcategory"):
+            active_filters.append(f"Subcategory: {filters['subcategory']}")
+        
+        return "\n".join(active_filters) if active_filters else "No filters applied"

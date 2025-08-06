@@ -88,8 +88,11 @@ class MainWindow:
         self.load_btn = ttk.Button(toolbar_frame, text="📁 Load Data", command=self._on_load_data)
         self.load_btn.pack(side=tk.LEFT, padx=(0, 5))
         
-        self.export_btn = ttk.Button(toolbar_frame, text="💾 Export", command=self._on_export_results, state="disabled")
+        self.export_btn = ttk.Button(toolbar_frame, text="💾 Export Current", command=self._on_export_results, state="disabled")
         self.export_btn.pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.export_comprehensive_btn = ttk.Button(toolbar_frame, text="📊 Export All Reports", command=self._on_export_comprehensive, state="disabled")
+        self.export_comprehensive_btn.pack(side=tk.LEFT, padx=(0, 5))
         
         self.refresh_btn = ttk.Button(toolbar_frame, text="🔄 Refresh", command=self._on_refresh, state="disabled")
         self.refresh_btn.pack(side=tk.LEFT, padx=(0, 5))
@@ -129,21 +132,49 @@ class MainWindow:
         filters_frame.grid_columnconfigure(1, weight=1)
         filters_frame.grid_columnconfigure(3, weight=1)
         
-        # Date range filters
+        # Date range filters with elegant presets
         ttk.Label(filters_frame, text="Date Range:").grid(row=0, column=0, sticky="w", padx=(0, 5))
         
-        date_frame = ttk.Frame(filters_frame)
-        date_frame.grid(row=0, column=1, sticky="ew", padx=(0, 20))
+        date_container = ttk.Frame(filters_frame)
+        date_container.grid(row=0, column=1, sticky="ew", padx=(0, 20))
         
-        ttk.Label(date_frame, text="From:").pack(side=tk.LEFT)
+        # Date preset buttons (top row)
+        preset_frame = ttk.Frame(date_container)
+        preset_frame.pack(fill=tk.X, pady=(0, 5))
+        
+        self.date_presets = [
+            ("Last 7 Days", 7),
+            ("Last 30 Days", 30), 
+            ("Last 90 Days", 90),
+            ("This Year", "YTD"),
+            ("All Time", "ALL")
+        ]
+        
+        for preset_name, preset_value in self.date_presets:
+            btn = ttk.Button(preset_frame, text=preset_name, 
+                           command=lambda v=preset_value: self._apply_date_preset(v),
+                           width=10)
+            btn.pack(side=tk.LEFT, padx=(0, 2))
+        
+        # Custom date entry (bottom row)
+        custom_frame = ttk.Frame(date_container)
+        custom_frame.pack(fill=tk.X)
+        
+        ttk.Label(custom_frame, text="From:").pack(side=tk.LEFT)
         self.date_from_var = tk.StringVar()
-        self.date_from_entry = ttk.Entry(date_frame, textvariable=self.date_from_var, width=12)
+        self.date_from_entry = ttk.Entry(custom_frame, textvariable=self.date_from_var, width=12)
         self.date_from_entry.pack(side=tk.LEFT, padx=(5, 10))
+        self.date_from_entry.bind('<KeyRelease>', self._on_filter_change)
         
-        ttk.Label(date_frame, text="To:").pack(side=tk.LEFT)
+        ttk.Label(custom_frame, text="To:").pack(side=tk.LEFT)
         self.date_to_var = tk.StringVar()
-        self.date_to_entry = ttk.Entry(date_frame, textvariable=self.date_to_var, width=12)
-        self.date_to_entry.pack(side=tk.LEFT, padx=(5, 0))
+        self.date_to_entry = ttk.Entry(custom_frame, textvariable=self.date_to_var, width=12)
+        self.date_to_entry.pack(side=tk.LEFT, padx=(5, 5))
+        self.date_to_entry.bind('<KeyRelease>', self._on_filter_change)
+        
+        # Clear button
+        clear_dates_btn = ttk.Button(custom_frame, text="Clear", command=self._clear_dates, width=6)
+        clear_dates_btn.pack(side=tk.LEFT, padx=(5, 0))
         
         # Priority filters
         ttk.Label(filters_frame, text="Priority:").grid(row=0, column=2, sticky="w", padx=(0, 5))
@@ -159,20 +190,32 @@ class MainWindow:
             cb = ttk.Checkbutton(priority_frame, text=priority[0], variable=var, command=self._on_filter_change)
             cb.pack(side=tk.LEFT, padx=5)
         
-        # Company and Site filters
+        # Company and Site filters with search
         ttk.Label(filters_frame, text="Company:").grid(row=1, column=0, sticky="w", padx=(0, 5), pady=(10, 0))
         
+        company_frame = ttk.Frame(filters_frame)
+        company_frame.grid(row=1, column=1, sticky="ew", padx=(0, 20), pady=(10, 0))
+        
         self.company_var = tk.StringVar(value="All")
-        self.company_combo = ttk.Combobox(filters_frame, textvariable=self.company_var, state="readonly", width=30)
-        self.company_combo.grid(row=1, column=1, sticky="ew", padx=(0, 20), pady=(10, 0))
+        self.company_combo = ttk.Combobox(company_frame, textvariable=self.company_var, width=25)
+        self.company_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.company_combo.bind('<<ComboboxSelected>>', self._on_company_changed)
+        self.company_combo.bind('<KeyRelease>', self._on_company_search)
+        
+        ttk.Button(company_frame, text="🔍", width=3, command=self._focus_company).pack(side=tk.RIGHT, padx=(2, 0))
         
         ttk.Label(filters_frame, text="Site:").grid(row=1, column=2, sticky="w", padx=(0, 5), pady=(10, 0))
         
+        site_frame = ttk.Frame(filters_frame)
+        site_frame.grid(row=1, column=3, sticky="ew", pady=(10, 0))
+        
         self.site_var = tk.StringVar(value="All")
-        self.site_combo = ttk.Combobox(filters_frame, textvariable=self.site_var, state="readonly", width=30)
-        self.site_combo.grid(row=1, column=3, sticky="ew", pady=(10, 0))
+        self.site_combo = ttk.Combobox(site_frame, textvariable=self.site_var, width=25)
+        self.site_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.site_combo.bind('<<ComboboxSelected>>', self._on_filter_change)
+        self.site_combo.bind('<KeyRelease>', self._on_site_search)
+        
+        ttk.Button(site_frame, text="🔍", width=3, command=self._focus_site).pack(side=tk.RIGHT, padx=(2, 0))
         
         # Advanced filters (collapsible)
         self.advanced_visible = tk.BooleanVar(value=False)
@@ -183,20 +226,32 @@ class MainWindow:
         # Advanced filters frame (initially hidden)
         self.advanced_frame = ttk.Frame(filters_frame)
         
-        # Category and Subcategory
+        # Category and Subcategory with search
         ttk.Label(self.advanced_frame, text="Category:").grid(row=0, column=0, sticky="w", padx=(0, 5), pady=(10, 0))
         
+        category_frame = ttk.Frame(self.advanced_frame)
+        category_frame.grid(row=0, column=1, sticky="ew", padx=(0, 20), pady=(10, 0))
+        
         self.category_var = tk.StringVar(value="All")
-        self.category_combo = ttk.Combobox(self.advanced_frame, textvariable=self.category_var, state="readonly", width=20)
-        self.category_combo.grid(row=0, column=1, sticky="ew", padx=(0, 20), pady=(10, 0))
+        self.category_combo = ttk.Combobox(category_frame, textvariable=self.category_var, width=16)
+        self.category_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.category_combo.bind('<<ComboboxSelected>>', self._on_category_changed)
+        self.category_combo.bind('<KeyRelease>', self._on_category_search)
+        
+        ttk.Button(category_frame, text="🔍", width=3, command=self._focus_category).pack(side=tk.RIGHT, padx=(2, 0))
         
         ttk.Label(self.advanced_frame, text="Subcategory:").grid(row=0, column=2, sticky="w", padx=(0, 5), pady=(10, 0))
         
+        subcategory_frame = ttk.Frame(self.advanced_frame)
+        subcategory_frame.grid(row=0, column=3, sticky="ew", pady=(10, 0))
+        
         self.subcategory_var = tk.StringVar(value="All")
-        self.subcategory_combo = ttk.Combobox(self.advanced_frame, textvariable=self.subcategory_var, state="readonly", width=20)
-        self.subcategory_combo.grid(row=0, column=3, sticky="ew", pady=(10, 0))
+        self.subcategory_combo = ttk.Combobox(subcategory_frame, textvariable=self.subcategory_var, width=16)
+        self.subcategory_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.subcategory_combo.bind('<<ComboboxSelected>>', self._on_filter_change)
+        self.subcategory_combo.bind('<KeyRelease>', self._on_subcategory_search)
+        
+        ttk.Button(subcategory_frame, text="🔍", width=3, command=self._focus_subcategory).pack(side=tk.RIGHT, padx=(2, 0))
         
         # Filter controls
         filter_controls = ttk.Frame(filters_frame)
@@ -345,6 +400,11 @@ class MainWindow:
         if 'export_results' in self.callbacks:
             self.callbacks['export_results']()
     
+    def _on_export_comprehensive(self):
+        """Handle comprehensive export button click"""
+        if 'export_comprehensive' in self.callbacks:
+            self.callbacks['export_comprehensive']()
+    
     def _on_export_selected(self):
         """Handle export selected button click"""
         if 'export_selected' in self.callbacks:
@@ -420,6 +480,90 @@ class MainWindow:
         self.category_var.set("All")
         self.subcategory_var.set("All")
         self._on_filter_change()
+    
+    def _apply_date_preset(self, preset_value):
+        """Apply a date preset"""
+        from datetime import datetime, timedelta
+        
+        now = datetime.now()
+        
+        if preset_value == "ALL":
+            self.date_from_var.set("")
+            self.date_to_var.set("")
+        elif preset_value == "YTD":
+            year_start = datetime(now.year, 1, 1)
+            self.date_from_var.set(year_start.strftime("%Y-%m-%d"))
+            self.date_to_var.set(now.strftime("%Y-%m-%d"))
+        else:  # numeric days
+            start_date = now - timedelta(days=preset_value)
+            self.date_from_var.set(start_date.strftime("%Y-%m-%d"))
+            self.date_to_var.set(now.strftime("%Y-%m-%d"))
+        
+        self._on_filter_change()
+    
+    def _clear_dates(self):
+        """Clear date range"""
+        self.date_from_var.set("")
+        self.date_to_var.set("")
+        self._on_filter_change()
+    
+    def _focus_company(self):
+        """Focus on company search"""
+        self.company_combo.focus()
+        self.company_combo.event_generate('<Button-1>')
+    
+    def _focus_site(self):
+        """Focus on site search"""
+        self.site_combo.focus()
+        self.site_combo.event_generate('<Button-1>')
+    
+    def _focus_category(self):
+        """Focus on category search"""
+        self.category_combo.focus()
+        self.category_combo.event_generate('<Button-1>')
+    
+    def _focus_subcategory(self):
+        """Focus on subcategory search"""
+        self.subcategory_combo.focus()
+        self.subcategory_combo.event_generate('<Button-1>')
+    
+    def _on_company_search(self, event=None):
+        """Handle company search as user types"""
+        search_text = self.company_var.get().lower()
+        if search_text and search_text != "all":
+            # Filter the company options based on search
+            all_companies = list(self.company_combo['values'])
+            filtered = [comp for comp in all_companies if search_text in comp.lower()]
+            self.company_combo['values'] = filtered
+            self.company_combo.event_generate('<Down>')
+    
+    def _on_site_search(self, event=None):
+        """Handle site search as user types"""
+        search_text = self.site_var.get().lower()
+        if search_text and search_text != "all":
+            # Filter the site options based on search
+            all_sites = list(self.site_combo['values'])
+            filtered = [site for site in all_sites if search_text in site.lower()]
+            self.site_combo['values'] = filtered
+            self.site_combo.event_generate('<Down>')
+    
+    def _on_category_search(self, event=None):
+        """Handle category search as user types"""
+        search_text = self.category_var.get().lower()
+        if search_text and search_text != "all":
+            all_categories = list(self.category_combo['values'])
+            filtered = [cat for cat in all_categories if search_text in cat.lower()]
+            self.category_combo['values'] = filtered
+            self.category_combo.event_generate('<Down>')
+    
+    def _on_subcategory_search(self, event=None):
+        """Handle subcategory search as user types"""
+        search_text = self.subcategory_var.get().lower()
+        if search_text and search_text != "all":
+            all_subcategories = list(self.subcategory_combo['values'])
+            filtered = [subcat for subcat in all_subcategories if search_text in subcat.lower()]
+            self.subcategory_combo['values'] = filtered
+            self.subcategory_combo.event_generate('<Down>')
     
     def _on_data_summary(self):
         """Handle data summary menu item"""
@@ -529,6 +673,7 @@ class MainWindow:
         
         # Update button states
         self.export_btn.config(state=state)
+        self.export_comprehensive_btn.config(state=state)
         self.refresh_btn.config(state=state)
         self.export_selected_btn.config(state=state)
         
