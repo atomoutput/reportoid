@@ -19,10 +19,10 @@ def test_data_loading():
     data_manager = DataManager(settings)
     
     # Test loading the sample CSV
-    csv_path = "wowzi.csv"
+    csv_path = "stability_monitor/tests/sample_data/wowzi.csv"
     if not os.path.exists(csv_path):
         print(f"Sample CSV not found at {csv_path}")
-        return False
+        return False, None
     
     result = data_manager.load_file(csv_path)
     
@@ -30,7 +30,7 @@ def test_data_loading():
         print("Data loading failed:")
         for error in result["errors"]:
             print(f"  - {error}")
-        return False
+        return False, None
     
     print("✓ Data loaded successfully!")
     print(f"  - Records: {result['info']['processed_records']}")
@@ -81,6 +81,14 @@ def test_reports(data_manager):
     print("Testing Equipment Analysis report...")
     results, columns = report_engine.generate_equipment_analysis_report(data_manager.data)
     print(f"  - Found {len(results)} equipment categories")
+    
+    # Test Incident Details report
+    print("Testing Incident Details report...")
+    results, columns = report_engine.generate_incident_details_report(data_manager.data)
+    print(f"  - Found {len(results)} individual tickets")
+    if results:
+        print(f"  - Columns: {columns}")
+        print(f"  - Sample ticket: {results[0][1]} - {results[0][2][:30]}...")
     
     print("✓ All reports tested successfully!")
 

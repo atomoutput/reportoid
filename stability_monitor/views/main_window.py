@@ -256,7 +256,26 @@ class MainWindow:
         self.workload_btn = ttk.Button(enhanced_frame, text="📈 Workload Trends",
                                      command=lambda: self._on_run_report("workload_trends"),
                                      state="disabled")
-        self.workload_btn.pack(side=tk.LEFT)
+        self.workload_btn.pack(side=tk.LEFT, padx=(0, 5))
+        
+        # Detail reports (third row)
+        detail_frame = ttk.Frame(reports_frame)
+        detail_frame.pack(fill=tk.X, pady=(5, 0))
+        
+        self.incident_details_btn = ttk.Button(detail_frame, text="📋 Incident Details",
+                                             command=lambda: self._on_run_report("incident_details"),
+                                             state="disabled")
+        self.incident_details_btn.pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.drill_down_btn = ttk.Button(detail_frame, text="🔍 Site Drill-Down",
+                                       command=self._on_drill_down,
+                                       state="disabled")
+        self.drill_down_btn.pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.export_filtered_btn = ttk.Button(detail_frame, text="📤 Export Filtered Data",
+                                            command=self._on_export_filtered_data,
+                                            state="disabled")
+        self.export_filtered_btn.pack(side=tk.LEFT)
     
     def _create_results_panel(self):
         """Create the results display panel"""
@@ -355,6 +374,29 @@ class MainWindow:
         """Handle category selection change"""
         if 'category_changed' in self.callbacks:
             self.callbacks['category_changed'](self.category_var.get())
+    
+    def _on_drill_down(self):
+        """Handle site drill-down button click"""
+        # Get selected site from results tree
+        tree = self.results_tree
+        selected_items = tree.selection()
+        
+        if not selected_items:
+            from tkinter import messagebox
+            messagebox.showwarning("No Selection", "Please select a site from the results to drill down.")
+            return
+        
+        # Get the site name from the selected row (first column)
+        selected_item = selected_items[0]
+        site_name = tree.item(selected_item)['values'][0]
+        
+        if 'drill_down' in self.callbacks:
+            self.callbacks['drill_down'](site_name)
+    
+    def _on_export_filtered_data(self):
+        """Handle export filtered data button click"""
+        if 'export_filtered_data' in self.callbacks:
+            self.callbacks['export_filtered_data']()
     
     def _toggle_advanced_filters(self):
         """Toggle visibility of advanced filters"""
@@ -494,7 +536,8 @@ class MainWindow:
         report_buttons = [
             self.hotspots_btn, self.scorecard_btn, self.green_btn, 
             self.franchise_btn, self.equipment_btn, self.repeat_btn,
-            self.resolution_btn, self.workload_btn
+            self.resolution_btn, self.workload_btn, self.incident_details_btn,
+            self.drill_down_btn, self.export_filtered_btn
         ]
         
         for btn in report_buttons:

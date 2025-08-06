@@ -9,11 +9,14 @@ A powerful desktop application for analyzing IT support ticket data and generati
 ## ✨ Key Features
 
 ### 📊 **Comprehensive Reporting**
-- **Critical Hotspots**: Identify sites with recurring critical issues
+- **Critical Hotspots**: Identify sites with recurring critical issues (with sample ticket numbers)
 - **Site Scorecard**: Performance metrics with MTTR analysis
 - **Green List**: Recognize stable, well-performing locations
 - **Franchise Overview**: Company-level performance comparison
 - **Equipment Analysis**: Breakdown by hardware/software categories
+- **📋 Incident Details**: Individual ticket view showing exact cases from your data
+- **🔍 Site Drill-Down**: Deep-dive analysis for specific locations
+- **📤 Export Filtered Data**: Export raw data matching your current filters
 
 ### 🔍 **Advanced Filtering**
 - Date range filtering with preset options

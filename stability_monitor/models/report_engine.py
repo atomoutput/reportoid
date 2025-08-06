@@ -51,18 +51,29 @@ class ReportEngine:
         hotspots = hotspots.sort_values(["Critical_Count", "Latest_Incident"], 
                                        ascending=[False, False])
         
-        # Format for display
+        # Format for display with sample tickets
         results = []
         for _, row in hotspots.iterrows():
+            site_name = row["Site"]
+            
+            # Get sample critical tickets for this site
+            site_critical_tickets = critical_df[critical_df["Site"] == site_name]["Number"].dropna().head(3).tolist()
+            sample_tickets = ", ".join([str(t) for t in site_critical_tickets])
+            if len(site_critical_tickets) == 3 and len(critical_df[critical_df["Site"] == site_name]) > 3:
+                sample_tickets += " (+more)"
+            elif not sample_tickets:
+                sample_tickets = "No ticket #s"
+            
             results.append([
                 row["Site"],
                 row["Company"],
                 int(row["Critical_Count"]),
                 row["Latest_Incident"].strftime("%Y-%m-%d %H:%M") if pd.notna(row["Latest_Incident"]) else "N/A",
-                int(row["Days_Since_Last"]) if pd.notna(row["Days_Since_Last"]) else "N/A"
+                int(row["Days_Since_Last"]) if pd.notna(row["Days_Since_Last"]) else "N/A",
+                sample_tickets
             ])
         
-        columns = ["Site", "Company", "Critical Count", "Latest Incident", "Days Since Last"]
+        columns = ["Site", "Company", "Critical Count", "Latest Incident", "Days Since Last", "Sample Tickets"]
         return results, columns
     
     def generate_site_scorecard_report(self, df: pd.DataFrame) -> Tuple[List[List], List[str]]:
@@ -322,3 +333,127 @@ class ReportEngine:
         }
         
         return summary
+    
+    def generate_incident_details_report(self, df: pd.DataFrame) -> Tuple[List[List], List[str]]:
+        """
+        Generate Incident Details Report
+        Shows individual tickets matching current filters
+        """
+        if df.empty:
+            return [], []
+        
+        # Sort by site, then by created date (most recent first)
+        df_sorted = df.sort_values(["Site", "Created"], ascending=[True, False])
+        
+        results = []
+        for _, row in df_sorted.iterrows():
+            # Format created date
+            created_str = row["Created"].strftime("%Y-%m-%d %H:%M") if pd.notna(row["Created"]) else "N/A"
+            
+            # Format resolved date and calculate resolution time
+            if pd.notna(row.get("Resolved")):
+                resolved_str = row["Resolved"].strftime("%Y-%m-%d %H:%M")
+                status = "Resolved"
+                resolution_hours = row.get("Resolution_Hours", 0)
+                if resolution_hours and resolution_hours > 0:
+                    if resolution_hours < 24:
+                        resolution_time = f"{resolution_hours:.1f}h"
+                    else:
+                        days = resolution_hours / 24
+                        resolution_time = f"{days:.1f}d"
+                else:
+                    resolution_time = "N/A"
+            else:
+                resolved_str = "Open"
+                status = "Open"
+                # Calculate days since created for open tickets
+                if pd.notna(row["Created"]):
+                    days_open = (pd.Timestamp.now() - row["Created"]).days
+                    resolution_time = f"{days_open}d open"
+                else:
+                    resolution_time = "N/A"
+            
+            # Get ticket description (truncate if too long)
+            description = str(row.get("Short description", "")).strip()
+            if len(description) > 60:
+                description = description[:57] + "..."
+            if not description or description == "nan":
+                description = "No description"
+            
+            # Get category and subcategory
+            category = str(row.get("Category", "")).strip()
+            subcategory = str(row.get("Subcategory", "")).strip()
+            if category == "nan" or not category:
+                category = "Other"
+            if subcategory == "nan" or not subcategory:
+                subcategory = ""
+            
+            category_full = f"{category}" + (f" - {subcategory}" if subcategory else "")
+            
+            results.append([
+                row["Site"],
+                str(row.get("Number", "N/A")),
+                description,
+                category_full,
+                row["Priority"],
+                created_str,
+                resolved_str,
+                resolution_time,
+                status,
+                row["Company"]
+            ])
+        
+        columns = ["Site", "Ticket #", "Description", "Category", "Priority", 
+                  "Created", "Resolved", "Resolution Time", "Status", "Company"]
+        return results, columns
+    
+    def generate_site_drill_down_report(self, df: pd.DataFrame, site_name: str) -> Tuple[List[List], List[str]]:
+        """
+        Generate drill-down report for a specific site
+        Shows all tickets for that site with full details
+        """
+        if df.empty:
+            return [], []
+        
+        # Filter for specific site
+        site_df = df[df["Site"] == site_name].copy()
+        
+        if site_df.empty:
+            return [], []
+        
+        # Use the incident details report for this site
+        return self.generate_incident_details_report(site_df)
+    
+    def enhance_existing_reports_with_sample_tickets(self, df: pd.DataFrame, report_results: List[List], 
+                                                   report_type: str) -> List[List]:
+        """
+        Enhance existing report results with sample ticket numbers
+        """
+        if not report_results or df.empty:
+            return report_results
+        
+        enhanced_results = []
+        
+        for row in report_results:
+            site_name = row[0]  # Site is always first column
+            
+            # Get tickets for this site
+            site_tickets = df[df["Site"] == site_name]
+            
+            if not site_tickets.empty:
+                # Get sample ticket numbers (up to 3)
+                sample_tickets = site_tickets["Number"].dropna().head(3).tolist()
+                sample_str = ", ".join([str(t) for t in sample_tickets])
+                if len(sample_tickets) == 3 and len(site_tickets) > 3:
+                    sample_str += f" (+{len(site_tickets) - 3} more)"
+                elif not sample_str:
+                    sample_str = "No ticket #s"
+                
+                # Add sample tickets as last column
+                enhanced_row = row + [sample_str]
+            else:
+                enhanced_row = row + ["No tickets"]
+            
+            enhanced_results.append(enhanced_row)
+        
+        return enhanced_results

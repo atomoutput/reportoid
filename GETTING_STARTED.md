@@ -42,9 +42,24 @@ Click any report button to generate analysis:
 - **⏱️ Resolution Tracking**: SLA compliance tracking
 - **📈 Workload Trends**: Ticket volume patterns
 
-### 4. Export Results
+#### Individual Ticket Analysis:
+- **📋 Incident Details**: View individual tickets with full details (ticket #, description, resolution time)
+- **🔍 Site Drill-Down**: Select a site from any report and drill down to see all its tickets
+- **📤 Export Filtered Data**: Export the exact raw data matching your filters
+
+### 4. View Individual Cases
+- **📋 Incident Details**: Click to see every individual ticket matching your filters
+  - Shows: Ticket #, Description, Category, Priority, Created/Resolved times, Status
+  - Perfect for: "Show me the exact tickets for Monday 2pm - Wednesday 7am"
+- **🔍 Site Drill-Down**: Select any site from a report and click "Site Drill-Down"
+  - Shows: All tickets for that specific site with full details
+- **📤 Export Filtered Data**: Export the raw ticket data (not summary) matching your filters
+  - Includes: All original CSV columns for the filtered tickets
+
+### 5. Export Results
 - **Export All**: Click "💾 Export" to save current report results
 - **Export Selected**: Select specific rows, then click "Export Selected"
+- **Export Filtered Data**: Get the underlying ticket data, not just summaries
 - Choose CSV or Excel format
 
 ## Data Requirements

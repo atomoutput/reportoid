@@ -43,6 +43,8 @@ class AppController:
         self.main_window.set_callback('category_changed', self._handle_category_changed)
         self.main_window.set_callback('data_summary', self._handle_data_summary)
         self.main_window.set_callback('settings', self._handle_settings)
+        self.main_window.set_callback('drill_down', self._handle_drill_down)
+        self.main_window.set_callback('export_filtered_data', self._handle_export_filtered_data)
     
     def _handle_load_data(self):
         """Handle data loading from file"""
@@ -258,7 +260,8 @@ class AppController:
                 "site_scorecard": "Site Stability Scorecard",
                 "green_list": "Green List - Stable Operations",
                 "franchise_overview": "Franchise Performance Overview",
-                "equipment_analysis": "Equipment Category Analysis"
+                "equipment_analysis": "Equipment Category Analysis",
+                "incident_details": "Incident Details - Individual Tickets"
             }
             
             title = report_titles.get(report_type, report_type.replace('_', ' ').title())
@@ -283,6 +286,8 @@ class AppController:
             return self.report_engine.generate_franchise_overview_report(data)
         elif report_type == "equipment_analysis":
             return self.report_engine.generate_equipment_analysis_report(data)
+        elif report_type == "incident_details":
+            return self.report_engine.generate_incident_details_report(data)
         else:
             # Placeholder for other report types
             return [], []
@@ -398,3 +403,119 @@ class AppController:
                 all_subcategories.extend(subcat_list)
             unique_subcategories = sorted(list(set(all_subcategories)))
             self.main_window.update_subcategory_options(unique_subcategories)
+    
+    def _handle_drill_down(self, site_name: str):
+        """Handle site drill-down functionality"""
+        try:
+            if self.data_manager.data is None:
+                messagebox.showwarning("No Data", "Please load data first.")
+                return
+            
+            # Get current filters
+            filters = self.main_window.get_current_filters()
+            
+            # Apply filters to get filtered data
+            filtered_data = self.data_manager.apply_filters(filters)
+            
+            if filtered_data.empty:
+                messagebox.showwarning("No Data", "No data matches the current filters.")
+                return
+            
+            self.main_window.set_status(f"Generating drill-down report for {site_name}...")
+            self.main_window.show_progress(True, 50)
+            self.root.update()
+            
+            # Generate site-specific report
+            results, columns = self.report_engine.generate_site_drill_down_report(filtered_data, site_name)
+            
+            self.main_window.show_progress(False)
+            
+            if not results:
+                messagebox.showinfo("No Results", f"No tickets found for {site_name} with current filters.")
+                self.main_window.set_status("Drill-down completed - no results")
+                return
+            
+            # Display results
+            title = f"Site Drill-Down: {site_name}"
+            self.main_window.display_results(results, columns, title)
+            
+            self.main_window.set_status(f"Drill-down completed: {len(results)} tickets for {site_name}")
+            
+        except Exception as e:
+            self.main_window.show_progress(False)
+            self.main_window.set_status("Error generating drill-down")
+            messagebox.showerror("Drill-Down Error", f"Failed to generate drill-down report:\n{str(e)}")
+    
+    def _handle_export_filtered_data(self):
+        """Handle exporting filtered raw data"""
+        try:
+            if self.data_manager.data is None:
+                messagebox.showwarning("No Data", "Please load data first.")
+                return
+            
+            # Get current filters
+            filters = self.main_window.get_current_filters()
+            
+            # Apply filters to get filtered data
+            filtered_data = self.data_manager.apply_filters(filters)
+            
+            if filtered_data.empty:
+                messagebox.showwarning("No Data", "No data matches the current filters.")
+                return
+            
+            # Get file path for export
+            file_path = filedialog.asksaveasfilename(
+                title="Export Filtered Data",
+                defaultextension=".csv",
+                filetypes=[
+                    ("CSV files", "*.csv"),
+                    ("Excel files", "*.xlsx"),
+                    ("All files", "*.*")
+                ]
+            )
+            
+            if not file_path:
+                return
+            
+            # Prepare data for export (clean up internal columns)
+            export_data = filtered_data.copy()
+            
+            # Remove internal calculated columns
+            internal_columns = ["Is_Critical", "Is_Resolved", "Resolution_Hours", "Days_Since_Created"]
+            for col in internal_columns:
+                if col in export_data.columns:
+                    export_data = export_data.drop(columns=[col])
+            
+            # Export data
+            if file_path.lower().endswith('.csv'):
+                export_data.to_csv(file_path, index=False)
+            elif file_path.lower().endswith(('.xlsx', '.xls')):
+                export_data.to_excel(file_path, index=False)
+            else:
+                export_data.to_csv(file_path, index=False)  # Default to CSV
+            
+            self.main_window.set_status(f"Filtered data exported to {file_path}")
+            
+            # Show summary of exported data
+            active_filters = []
+            if filters.get("date_from"):
+                active_filters.append(f"Date from: {filters['date_from']}")
+            if filters.get("date_to"):
+                active_filters.append(f"Date to: {filters['date_to']}")
+            if filters.get("priorities"):
+                active_filters.append(f"Priorities: {', '.join(filters['priorities'])}")
+            if filters.get("company"):
+                active_filters.append(f"Company: {filters['company']}")
+            if filters.get("site"):
+                active_filters.append(f"Site: {filters['site']}")
+            
+            filter_summary = "\n".join(active_filters) if active_filters else "No filters applied"
+            
+            messagebox.showinfo("Export Complete", 
+                              f"Filtered data exported successfully!\n\n"
+                              f"Records exported: {len(export_data)}\n"
+                              f"File: {file_path}\n\n"
+                              f"Applied filters:\n{filter_summary}")
+            
+        except Exception as e:
+            messagebox.showerror("Export Error", f"Failed to export filtered data:\n{str(e)}")
