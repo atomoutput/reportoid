@@ -30,6 +30,15 @@ class StabilityMetrics:
         self.sites_with_zero_incidents = 0
         self.portfolio_coverage_percentage = 0.0  # % of supported sites that had any activity
         
+        # Critical incident distribution breakdown (new)
+        self.critical_distribution = {
+            "zero_criticals": {"count": 0, "percentage": 0.0},
+            "one_critical": {"count": 0, "percentage": 0.0},
+            "two_criticals": {"count": 0, "percentage": 0.0},
+            "three_criticals": {"count": 0, "percentage": 0.0},
+            "four_plus_criticals": {"count": 0, "percentage": 0.0}
+        }
+        
 class SystemStabilityAnalyzer:
     """Analyzes system-wide stability metrics and performance trends"""
     
@@ -195,6 +204,72 @@ class SystemStabilityAnalyzer:
         # Ensure values are within valid ranges
         metrics.portfolio_coverage_percentage = max(0.0, min(100.0, metrics.portfolio_coverage_percentage))
         metrics.portfolio_stability_percentage = max(0.0, min(100.0, metrics.portfolio_stability_percentage))
+        
+        # Calculate critical incident distribution breakdown
+        self._calculate_critical_distribution(df, metrics)
+    
+    def _calculate_critical_distribution(self, df: pd.DataFrame, metrics: StabilityMetrics) -> None:
+        """
+        Calculate distribution of sites by number of critical incidents
+        Shows breakdown: 0 criticals, 1 critical, 2 criticals, 3 criticals, 4+ criticals
+        """
+        if df.empty:
+            # All sites have zero criticals when no data
+            metrics.critical_distribution["zero_criticals"]["count"] = metrics.total_supported_sites
+            metrics.critical_distribution["zero_criticals"]["percentage"] = 100.0
+            return
+        
+        # Count critical incidents per site
+        site_critical_counts = df.groupby('Site')['Is_Critical'].sum()
+        
+        # Initialize distribution counters
+        distribution = {
+            0: 0,  # zero criticals
+            1: 0,  # one critical
+            2: 0,  # two criticals
+            3: 0,  # three criticals
+            4: 0   # four or more criticals
+        }
+        
+        # Count sites in each category from the data
+        for site, critical_count in site_critical_counts.items():
+            if critical_count == 0:
+                distribution[0] += 1
+            elif critical_count == 1:
+                distribution[1] += 1
+            elif critical_count == 2:
+                distribution[2] += 1
+            elif critical_count == 3:
+                distribution[3] += 1
+            else:  # 4 or more
+                distribution[4] += 1
+        
+        # Handle portfolio mode vs data-only mode
+        if metrics.total_supported_sites > 0:
+            # Portfolio mode: include sites not in data as having zero criticals
+            sites_not_in_data = metrics.total_supported_sites - len(site_critical_counts)
+            distribution[0] += sites_not_in_data  # Sites not in data have zero criticals
+            
+            total_sites_for_percentage = metrics.total_supported_sites
+        else:
+            # Data-only mode: only consider sites that appear in data
+            total_sites_for_percentage = len(site_critical_counts) if len(site_critical_counts) > 0 else 1
+        
+        # Calculate percentages and populate metrics
+        metrics.critical_distribution["zero_criticals"]["count"] = distribution[0]
+        metrics.critical_distribution["zero_criticals"]["percentage"] = (distribution[0] / total_sites_for_percentage) * 100.0
+        
+        metrics.critical_distribution["one_critical"]["count"] = distribution[1]
+        metrics.critical_distribution["one_critical"]["percentage"] = (distribution[1] / total_sites_for_percentage) * 100.0
+        
+        metrics.critical_distribution["two_criticals"]["count"] = distribution[2]
+        metrics.critical_distribution["two_criticals"]["percentage"] = (distribution[2] / total_sites_for_percentage) * 100.0
+        
+        metrics.critical_distribution["three_criticals"]["count"] = distribution[3]
+        metrics.critical_distribution["three_criticals"]["percentage"] = (distribution[3] / total_sites_for_percentage) * 100.0
+        
+        metrics.critical_distribution["four_plus_criticals"]["count"] = distribution[4]
+        metrics.critical_distribution["four_plus_criticals"]["percentage"] = (distribution[4] / total_sites_for_percentage) * 100.0
     
     def _calculate_weighted_stability_score(self, df: pd.DataFrame) -> float:
         """
@@ -526,6 +601,25 @@ class SystemStabilityAnalyzer:
             insights.append(f"📉 System availability ({metrics.system_availability:.1f}%) below industry standards")
         elif metrics.system_availability > 99.5:
             insights.append("🎯 Excellent system availability exceeding industry standards")
+        
+        # Critical distribution insights (NEW)
+        distribution = metrics.critical_distribution
+        if distribution['zero_criticals']['percentage'] >= 95:
+            insights.append(f"🎯 Excellent stability distribution: {distribution['zero_criticals']['percentage']:.1f}% of sites have zero critical incidents")
+        elif distribution['zero_criticals']['percentage'] >= 85:
+            insights.append(f"📊 Good stability distribution: {distribution['zero_criticals']['percentage']:.1f}% of sites stable, focus on remaining {100-distribution['zero_criticals']['percentage']:.1f}%")
+        else:
+            insights.append(f"⚠️ Stability distribution concern: Only {distribution['zero_criticals']['percentage']:.1f}% of sites have zero criticals - portfolio-wide improvement needed")
+        
+        # Multiple critical incidents insights
+        if distribution['four_plus_criticals']['percentage'] > 0:
+            insights.append(f"🚨 {distribution['four_plus_criticals']['count']} sites have 4+ critical incidents ({distribution['four_plus_criticals']['percentage']:.1f}%) - immediate intervention required")
+        elif distribution['three_criticals']['percentage'] > 0:
+            insights.append(f"⚠️ {distribution['three_criticals']['count']} sites have 3 critical incidents - prioritize for stability improvement")
+        
+        # Positive distribution insights
+        if distribution['one_critical']['percentage'] > 0 and distribution['two_criticals']['percentage'] == 0 and distribution['three_criticals']['percentage'] == 0 and distribution['four_plus_criticals']['percentage'] == 0:
+            insights.append(f"✅ Controlled impact: Critical incidents limited to single occurrences per site ({distribution['one_critical']['percentage']:.1f}% of sites)")
         
         # Trend insights
         if metrics.stability_trend == 'improving':

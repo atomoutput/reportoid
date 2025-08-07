@@ -968,7 +968,42 @@ class AppController:
                  "🟢 Good" if stability_metrics.benchmark_score >= 80 else 
                  "🟡 Fair" if stability_metrics.benchmark_score >= 60 else 
                  "🔴 Poor",
-                 "Overall score against industry benchmarks"]
+                 "Overall score against industry benchmarks"],
+                
+                # Critical incident distribution breakdown (NEW)
+                ["", "", "", "", ""],  # Separator row
+                ["CRITICAL INCIDENT DISTRIBUTION", "", "", "", ""],
+                ["Sites with 0 Critical Incidents", 
+                 f"{stability_metrics.critical_distribution['zero_criticals']['count']} sites ({stability_metrics.critical_distribution['zero_criticals']['percentage']:.1f}%)", 
+                 "Target: 95%+", 
+                 "🟢 Excellent" if stability_metrics.critical_distribution['zero_criticals']['percentage'] >= 95 else 
+                 "🟡 Good" if stability_metrics.critical_distribution['zero_criticals']['percentage'] >= 85 else 
+                 "🔴 Needs Attention",
+                 "Sites with zero critical incidents (ideal state)"],
+                
+                ["Sites with 1 Critical Incident", 
+                 f"{stability_metrics.critical_distribution['one_critical']['count']} sites ({stability_metrics.critical_distribution['one_critical']['percentage']:.1f}%)", 
+                 "Monitor closely", 
+                 "🟡 Monitor",
+                 "Sites with exactly one critical incident"],
+                
+                ["Sites with 2 Critical Incidents", 
+                 f"{stability_metrics.critical_distribution['two_criticals']['count']} sites ({stability_metrics.critical_distribution['two_criticals']['percentage']:.1f}%)", 
+                 "Requires attention", 
+                 "🟡 Attention" if stability_metrics.critical_distribution['two_criticals']['percentage'] <= 5 else "🔴 Concern",
+                 "Sites with exactly two critical incidents"],
+                
+                ["Sites with 3 Critical Incidents", 
+                 f"{stability_metrics.critical_distribution['three_criticals']['count']} sites ({stability_metrics.critical_distribution['three_criticals']['percentage']:.1f}%)", 
+                 "High priority review", 
+                 "🔴 High Priority" if stability_metrics.critical_distribution['three_criticals']['percentage'] > 0 else "🟢 None",
+                 "Sites with exactly three critical incidents"],
+                
+                ["Sites with 4+ Critical Incidents", 
+                 f"{stability_metrics.critical_distribution['four_plus_criticals']['count']} sites ({stability_metrics.critical_distribution['four_plus_criticals']['percentage']:.1f}%)", 
+                 "Immediate action", 
+                 "🔴 Critical" if stability_metrics.critical_distribution['four_plus_criticals']['percentage'] > 0 else "🟢 None",
+                 "Sites with four or more critical incidents (requires immediate intervention)"]
             ]
             
             return stability_data
