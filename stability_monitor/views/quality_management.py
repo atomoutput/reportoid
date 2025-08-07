@@ -24,14 +24,15 @@ class DuplicateReviewDialog(tk.Toplevel):
         
         # Initialize selection state (all selected by default, first as primary)
         for i, ticket in enumerate(self.all_tickets):
-            ticket_id = ticket.get('Number', f'ticket_{i}')
-            self.ticket_selection[ticket_id] = {
+            # Safely extract ticket ID to avoid Series issues
+            ticket_id = self._safe_get_scalar(ticket.get('Number', f'ticket_{i}'))
+            self.ticket_selection[str(ticket_id)] = {
                 'selected': True,
                 'is_primary': i == 0,
                 'ticket_data': ticket
             }
             if i == 0:
-                self.primary_ticket_id = ticket_id
+                self.primary_ticket_id = str(ticket_id)
         
         self.title(f"Review Duplicate Group - {duplicate_group.confidence_score:.1%} Confidence")
         self.geometry("900x700")  # Larger to accommodate selection controls
@@ -485,7 +486,7 @@ class DuplicateReviewDialog(tk.Toplevel):
                 primary_ticket = sel['ticket_data']
                 break
         
-        if not primary_ticket:
+        if primary_ticket is None or (hasattr(primary_ticket, 'empty') and primary_ticket.empty):
             self.preview_text.insert(tk.END, "No primary ticket selected.")
             self.preview_text.config(state=tk.DISABLED)
             return
