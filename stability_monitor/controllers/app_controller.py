@@ -13,7 +13,6 @@ import logging
 from ..models.data_manager import DataManager
 from ..models.report_engine import ReportEngine
 from ..views.main_window import MainWindow
-from ..views.analytics_drilldown import AnalyticsDrilldownDialog
 from ..utils.audit_trail import AuditTrailManager, AuditAction
 from ..utils.stability_analytics import SystemStabilityAnalyzer
 from ..utils.pattern_recognition import TimePatternEngine
@@ -342,13 +341,11 @@ class AppController:
             
             title = report_titles.get(report_type, "Analytics Report")
             
-            # Hide progress and show analytics drilldown dialog
+            # Hide progress and display analytics results in main area
             self.main_window.show_progress(False)
             
-            # Create and show enhanced analytics dialog
-            analytics_dialog = AnalyticsDrilldownDialog(
-                parent=self.root,
-                title=title,
+            # Display analytics results directly in the main results area
+            self.main_window.display_analytics_results(
                 analytics_data=analytics_data,
                 underlying_tickets=filtered_data,
                 report_type=report_type

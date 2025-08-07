@@ -5,6 +5,7 @@ Main application window
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from typing import Dict, Any, Callable
+import pandas as pd
 from .quality_management import DataQualityTab
 
 class MainWindow:
@@ -733,6 +734,147 @@ class MainWindow:
         
         # Update results info
         self.results_info_label.config(text=f"{title}: {len(data)} records")
+    
+    def display_analytics_results(self, analytics_data: dict, underlying_tickets, report_type: str):
+        """Display analytics results directly in the main results area"""
+        # Clear existing data
+        for item in self.results_tree.get_children():
+            self.results_tree.delete(item)
+        
+        # Create analytics display data
+        analytics_display_data = []
+        columns = ["Metric", "Value", "Details"]
+        
+        # Configure columns for analytics display
+        self.results_tree['columns'] = columns
+        self.results_tree['show'] = 'headings'
+        
+        # Set column headings and widths
+        self.results_tree.heading("Metric", text="Analytics Metric")
+        self.results_tree.heading("Value", text="Value")
+        self.results_tree.heading("Details", text="Details/Description")
+        
+        self.results_tree.column("Metric", width=200, minwidth=150)
+        self.results_tree.column("Value", width=120, minwidth=80)
+        self.results_tree.column("Details", width=400, minwidth=200)
+        
+        # Build display data based on report type
+        if report_type == "system_stability_dashboard":
+            self._build_stability_dashboard_data(analytics_data, analytics_display_data)
+        elif report_type == "time_pattern_analysis":
+            self._build_pattern_analysis_data(analytics_data, analytics_display_data)
+        elif report_type == "stability_insights":
+            self._build_stability_insights_data(analytics_data, analytics_display_data)
+        
+        # Insert analytics data
+        for row in analytics_display_data:
+            self.results_tree.insert('', 'end', values=row)
+        
+        # Add separator
+        self.results_tree.insert('', 'end', values=("", "", ""))
+        self.results_tree.insert('', 'end', values=("--- UNDERLYING EVIDENCE ---", f"{len(underlying_tickets)} tickets", "Tickets used for this analysis"))
+        
+        # Add sample of underlying tickets
+        ticket_columns = ["Number", "Site", "Priority", "Created", "Description", "Status"]
+        sample_size = min(10, len(underlying_tickets))  # Show max 10 sample tickets
+        
+        for i, (_, ticket) in enumerate(underlying_tickets.head(sample_size).iterrows()):
+            from ..utils.date_utils import safe_date_display
+            created_str = safe_date_display(ticket.get('Created'))
+            status = "Resolved" if pd.notna(ticket.get('Resolved')) else "Open"
+            desc = str(ticket.get('Short description', ''))[:50] + ("..." if len(str(ticket.get('Short description', ''))) > 50 else "")
+            
+            self.results_tree.insert('', 'end', values=(
+                ticket.get('Number', 'N/A'),
+                f"{ticket.get('Site', 'Unknown')} | {ticket.get('Priority', 'Unknown')}",
+                f"{created_str} | {desc} | {status}"
+            ))
+        
+        # Update results info with analytics title
+        report_titles = {
+            "system_stability_dashboard": "System Stability Dashboard",
+            "time_pattern_analysis": "Time Pattern Analysis",
+            "stability_insights": "Stability Insights"
+        }
+        title = report_titles.get(report_type, "Analytics Report")
+        
+        total_items = len(analytics_display_data) + sample_size + 2  # analytics + sample + separators
+        self.results_info_label.config(text=f"{title}: {len(analytics_display_data)} metrics, {len(underlying_tickets)} evidence tickets (showing {sample_size} samples)")
+    
+    def _build_stability_dashboard_data(self, analytics_data: dict, display_data: list):
+        """Build display data for stability dashboard"""
+        stability_metrics = analytics_data.get('stability_metrics', {})
+        
+        # Core stability metrics
+        display_data.append(["Overall Stability", f"{stability_metrics.get('overall_stability_percentage', 0):.1f}%", "Percentage of sites with zero critical incidents"])
+        display_data.append(["Weighted Stability Score", f"{stability_metrics.get('weighted_stability_score', 0):.1f}%", "Weighted stability considering incident severity"])
+        display_data.append(["Critical Incident Rate", f"{stability_metrics.get('critical_incident_rate', 0):.1f}%", "Percentage of total incidents that are critical"])
+        display_data.append(["Mean Time to Recovery", f"{stability_metrics.get('mean_time_to_recovery', 0):.1f} hours", "Average time to resolve critical incidents"])
+        display_data.append(["System Availability", f"{stability_metrics.get('system_availability', 0):.1f}%", "Overall system uptime percentage"])
+        display_data.append(["Stability Trend", stability_metrics.get('stability_trend', 'Unknown').title(), "Current stability trend direction"])
+        display_data.append(["Benchmark Score", f"{stability_metrics.get('benchmark_score', 0):.1f}/100", "Industry benchmark comparison score"])
+        
+        # Portfolio metrics if available
+        portfolio_metrics = stability_metrics.get('portfolio_metrics', {})
+        if portfolio_metrics:
+            display_data.append(["--- PORTFOLIO STABILITY ---", "", ""])
+            display_data.append(["Total Supported Sites", str(portfolio_metrics.get('total_supported_sites', 0)), "Total number of sites under IT support"])
+            display_data.append(["Sites with Zero Critical", f"{portfolio_metrics.get('sites_with_zero_critical', 0)} ({portfolio_metrics.get('zero_critical_percentage', 0):.1f}%)", "Sites with no critical incidents"])
+            
+            # Critical distribution
+            critical_dist = stability_metrics.get('critical_distribution', {})
+            if critical_dist:
+                display_data.append(["Sites with 1 Critical", f"{critical_dist.get('one_critical', {}).get('count', 0)} ({critical_dist.get('one_critical', {}).get('percentage', 0):.1f}%)", "Sites with exactly one critical incident"])
+                display_data.append(["Sites with 2 Criticals", f"{critical_dist.get('two_criticals', {}).get('count', 0)} ({critical_dist.get('two_criticals', {}).get('percentage', 0):.1f}%)", "Sites with exactly two critical incidents"])
+                display_data.append(["Sites with 3 Criticals", f"{critical_dist.get('three_criticals', {}).get('count', 0)} ({critical_dist.get('three_criticals', {}).get('percentage', 0):.1f}%)", "Sites with exactly three critical incidents"])
+                display_data.append(["Sites with 4+ Criticals", f"{critical_dist.get('four_plus_criticals', {}).get('count', 0)} ({critical_dist.get('four_plus_criticals', {}).get('percentage', 0):.1f}%)", "Sites with four or more critical incidents"])
+        
+        # Site performance distribution
+        distribution = stability_metrics.get('site_performance_distribution', {})
+        if distribution:
+            display_data.append(["--- SITE PERFORMANCE ---", "", ""])
+            dist_data = distribution.get('distribution', {})
+            for category, data in dist_data.items():
+                display_data.append([f"{category.title()} Sites", f"{data.get('count', 0)} ({data.get('percentage', 0):.1f}%)", f"Sites categorized as {category.lower()} performance"])
+    
+    def _build_pattern_analysis_data(self, analytics_data: dict, display_data: list):
+        """Build display data for pattern analysis"""
+        pattern_results = analytics_data.get('pattern_results', {})
+        
+        # Synchronized incidents
+        sync_incidents = pattern_results.get('synchronized_incidents', [])
+        if sync_incidents:
+            display_data.append(["Synchronized Incident Groups", str(len(sync_incidents)), "Number of incident groups that occurred simultaneously"])
+            for i, incident in enumerate(sync_incidents[:5], 1):  # Show top 5
+                display_data.append([f"Sync Group {i}", f"{len(incident.sites)} sites, {incident.correlation_score:.1%} correlation", incident.likely_root_cause])
+        
+        # Correlations summary
+        correlations = pattern_results.get('time_correlation_matrix', {})
+        if correlations:
+            display_data.append(["Site Correlations Detected", "Yes", "Strong correlations found between sites indicating shared dependencies"])
+        
+        # Peak incident times
+        peak_times = pattern_results.get('peak_incident_times', [])
+        if peak_times:
+            display_data.append(["--- INCIDENT PATTERNS ---", "", ""])
+            for time_pattern in peak_times[:3]:  # Show top 3 patterns
+                display_data.append([f"Peak Time: {time_pattern.get('time_range', 'Unknown')}", f"{time_pattern.get('incident_count', 0)} incidents", f"Common pattern: {time_pattern.get('pattern_description', 'N/A')}"])
+    
+    def _build_stability_insights_data(self, analytics_data: dict, display_data: list):
+        """Build display data for stability insights"""
+        insights = analytics_data.get('insights', [])
+        
+        display_data.append(["--- KEY INSIGHTS ---", "", ""])
+        for i, insight in enumerate(insights, 1):
+            display_data.append([f"Insight {i}", "Recommendation", insight])
+        
+        # Supporting metrics
+        stability_metrics = analytics_data.get('stability_metrics')
+        if stability_metrics:
+            display_data.append(["--- SUPPORTING METRICS ---", "", ""])
+            display_data.append(["Overall Stability", f"{stability_metrics.overall_stability_percentage:.1f}%", "Current overall system stability"])
+            display_data.append(["Critical Incident Rate", f"{stability_metrics.critical_incident_rate:.1f}%", "Rate of critical incidents"])
+            display_data.append(["Benchmark Score", f"{stability_metrics.benchmark_score:.1f}/100", "Performance against industry benchmarks"])
     
     def set_status(self, status: str):
         """Update status bar text"""
