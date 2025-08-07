@@ -212,7 +212,9 @@ class DuplicateReviewDialog(tk.Toplevel):
             ticket_num.grid(row=row, column=2, padx=5, pady=2, sticky="w")
             
             # Description (truncated)
-            desc = str(ticket.get('Short description', 'N/A'))[:50] + ("..." if len(desc) > 50 else "")
+            desc_raw = ticket.get('Short description', 'N/A')
+            desc_full = str(desc_raw) if desc_raw is not None else 'N/A'
+            desc = desc_full[:50] + ("..." if len(desc_full) > 50 else "")
             desc_label = ttk.Label(selection_grid_frame, text=desc)
             desc_label.grid(row=row, column=3, padx=5, pady=2, sticky="w")
             

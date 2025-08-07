@@ -147,14 +147,9 @@ class DataQualityManager:
             (df['Created'] <= ticket_date + time_delta)
         )
         
-        # Site proximity filter - allow same site OR different sites for cross-site incidents
-        # For synchronized incidents, we want to find similar issues across different sites
-        if self.settings.get("duplicate_detection", {}).get("allow_cross_site", True):
-            # Allow all sites within reasonable geographic/operational proximity
-            site_mask = pd.Series([True] * len(df), index=df.index)
-        else:
-            # Traditional same-site duplicate detection only
-            site_mask = df['Site'] == ticket_site
+        # Site filter - duplicates are only detected within the same site
+        # This ensures we only find true duplicates, not synchronized incidents across sites
+        site_mask = df['Site'] == ticket_site
         
         # Exclude the ticket itself
         not_self_mask = df.index != ticket.name
@@ -171,10 +166,10 @@ class DataQualityManager:
         Calculate similarity score between two tickets using weighted factors
         """
         weights = {
-            'description': self.duplicate_config.get("description_weight", 0.4),
-            'site': self.duplicate_config.get("site_weight", 0.3),
-            'date': self.duplicate_config.get("date_weight", 0.2),
-            'priority': self.duplicate_config.get("priority_weight", 0.1)
+            'description': self.duplicate_config.get("description_weight", 0.6),  # Increased from 0.4
+            'date': self.duplicate_config.get("date_weight", 0.3),                # Increased from 0.2
+            'priority': self.duplicate_config.get("priority_weight", 0.1)          # Same
+            # Note: Removed site weight as all duplicates are now same-site only
         }
         
         scores = {}
@@ -187,17 +182,7 @@ class DataQualityManager:
         else:
             scores['description'] = 0.0
         
-        # Site similarity 
-        if ticket1['Site'] == ticket2['Site']:
-            scores['site'] = 1.0  # Same site - perfect match
-        else:
-            # Different sites - for cross-site incidents, reduce penalty if same company
-            site1_company = str(ticket1['Site']).split(' #')[0] if '#' in str(ticket1['Site']) else str(ticket1['Site'])
-            site2_company = str(ticket2['Site']).split(' #')[0] if '#' in str(ticket2['Site']) else str(ticket2['Site'])
-            if site1_company == site2_company:
-                scores['site'] = 0.7  # Same company, different locations - moderate match
-            else:
-                scores['site'] = 0.0  # Different companies - no match
+        # Note: Site similarity removed - all duplicates are now same-site only
         
         # Date similarity (closer dates = higher score)
         date_diff = abs((ticket1['Created'] - ticket2['Created']).total_seconds())
@@ -207,8 +192,8 @@ class DataQualityManager:
         # Priority similarity (exact match)
         scores['priority'] = 1.0 if ticket1['Priority'] == ticket2['Priority'] else 0.0
         
-        # Calculate weighted average
-        total_score = sum(scores[factor] * weights[factor] for factor in scores)
+        # Calculate weighted average (only for factors we actually computed)
+        total_score = sum(scores[factor] * weights[factor] for factor in scores if factor in weights)
         final_score = min(1.0, max(0.0, total_score))
         
         
