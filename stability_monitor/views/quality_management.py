@@ -17,8 +17,24 @@ class DuplicateReviewDialog(tk.Toplevel):
         self.callback = callback
         self.result = None
         
+        # Ticket selection state
+        self.all_tickets = self.duplicate_group.get_all_tickets()
+        self.ticket_selection = {}  # ticket_id -> (selected, is_primary)
+        self.primary_ticket_id = None
+        
+        # Initialize selection state (all selected by default, first as primary)
+        for i, ticket in enumerate(self.all_tickets):
+            ticket_id = ticket.get('Number', f'ticket_{i}')
+            self.ticket_selection[ticket_id] = {
+                'selected': True,
+                'is_primary': i == 0,
+                'ticket_data': ticket
+            }
+            if i == 0:
+                self.primary_ticket_id = ticket_id
+        
         self.title(f"Review Duplicate Group - {duplicate_group.confidence_score:.1%} Confidence")
-        self.geometry("800x600")
+        self.geometry("900x700")  # Larger to accommodate selection controls
         self.transient(parent)
         self.grab_set()
         
@@ -82,7 +98,7 @@ class DuplicateReviewDialog(tk.Toplevel):
         
         self.merge_btn = ttk.Button(
             button_frame, 
-            text="✅ Merge as Duplicates", 
+            text="✅ Merge Selected Tickets", 
             command=self._on_merge,
             style="Accent.TButton"
         )
@@ -90,14 +106,14 @@ class DuplicateReviewDialog(tk.Toplevel):
         
         self.dismiss_btn = ttk.Button(
             button_frame, 
-            text="❌ Dismiss (Not Duplicates)", 
+            text="❌ Not Duplicates", 
             command=self._on_dismiss
         )
         self.dismiss_btn.pack(side=tk.LEFT, padx=(0, 5))
         
         self.skip_btn = ttk.Button(
             button_frame, 
-            text="⏭️ Skip for Now", 
+            text="⏭️ Skip for Later", 
             command=self._on_skip
         )
         self.skip_btn.pack(side=tk.LEFT, padx=(0, 20))
@@ -115,73 +131,118 @@ class DuplicateReviewDialog(tk.Toplevel):
         self._create_details_view()
     
     def _create_comparison_view(self):
-        """Create side-by-side comparison of tickets"""
-        # Create canvas and scrollbar for comparison
-        canvas = tk.Canvas(self.comparison_frame)
-        scrollbar = ttk.Scrollbar(self.comparison_frame, orient="vertical", command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas)
+        """Create enhanced comparison view with ticket selection"""
+        # Create main container
+        main_container = ttk.Frame(self.comparison_frame)
+        main_container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
-        scrollable_frame.bind(
+        # Instructions frame
+        instructions_frame = ttk.LabelFrame(main_container, text="How to Review Duplicates", padding=10)
+        instructions_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        instructions_text = """
+📋 Review Instructions:
+1. Check the tickets below - similar tickets are grouped together for your review
+2. Use checkboxes to select which tickets should be merged together  
+3. Choose one ticket as 'Primary' - this ticket will be kept, others will be marked as duplicates
+4. Add review notes explaining your decision (optional but recommended)
+5. Click 'Merge as Duplicates' to process, or 'Dismiss' if they are not duplicates
+        """
+        
+        instructions_label = ttk.Label(instructions_frame, text=instructions_text.strip(), 
+                                     font=("Arial", 9), justify=tk.LEFT)
+        instructions_label.pack(anchor=tk.W)
+        
+        # Selection controls frame (top)
+        selection_frame = ttk.LabelFrame(main_container, text="Ticket Selection (Check tickets to merge)", padding=10)
+        selection_frame.pack(fill=tk.X, pady=(10, 10))
+        
+        # Create selection controls for each ticket
+        self.ticket_vars = {}  # Store tkinter variables
+        self.primary_var = tk.StringVar(value=self.primary_ticket_id)
+        
+        # Create scrollable frame for selection grid
+        canvas = tk.Canvas(selection_frame, height=200)
+        scrollbar = ttk.Scrollbar(selection_frame, orient="vertical", command=canvas.yview)
+        selection_grid_frame = ttk.Frame(canvas)
+        
+        selection_grid_frame.bind(
             "<Configure>",
             lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
         
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.create_window((0, 0), window=selection_grid_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
         
-        # Get all tickets in the group
-        all_tickets = self.duplicate_group.get_all_tickets()
-        
-        # Create headers
-        headers = ["Field", "Primary Ticket"] + [f"Duplicate {i+1}" for i in range(len(self.duplicate_group.duplicates))]
-        
-        for col, header in enumerate(headers):
-            header_label = ttk.Label(scrollable_frame, text=header, font=("Arial", 10, "bold"))
-            header_label.grid(row=0, column=col, padx=5, pady=2, sticky="ew")
-        
-        # Compare key fields
-        fields_to_compare = [
-            ("Ticket #", "Number"),
-            ("Site", "Site"),
-            ("Priority", "Priority"),
-            ("Created", "Created"),
-            ("Description", "Short description"),
-            ("Category", "Category"),
-            ("Subcategory", "Subcategory")
-        ]
-        
-        for row, (field_name, field_key) in enumerate(fields_to_compare, 1):
-            # Field name
-            field_label = ttk.Label(scrollable_frame, text=field_name, font=("Arial", 9, "bold"))
-            field_label.grid(row=row, column=0, padx=5, pady=1, sticky="w")
-            
-            # Values for each ticket
-            for col, ticket in enumerate(all_tickets, 1):
-                value = ticket.get(field_key, "N/A")
-                
-                # Format datetime fields
-                if field_key in ["Created", "Resolved"] and hasattr(value, 'strftime'):
-                    value = value.strftime("%Y-%m-%d %H:%M")
-                
-                # Highlight differences
-                is_different = False
-                if col > 1:  # Not the primary ticket
-                    primary_value = all_tickets[0].get(field_key, "N/A")
-                    is_different = str(value) != str(primary_value)
-                
-                # Create label with appropriate styling
-                value_text = str(value)[:40] + "..." if len(str(value)) > 40 else str(value)
-                
-                value_label = ttk.Label(
-                    scrollable_frame, 
-                    text=value_text,
-                    foreground="red" if is_different else "black"
-                )
-                value_label.grid(row=row, column=col, padx=5, pady=1, sticky="w")
-        
-        # Pack canvas and scrollbar
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
+        
+        # Headers for selection grid
+        ttk.Label(selection_grid_frame, text="Include", font=("Arial", 9, "bold")).grid(row=0, column=0, padx=5)
+        ttk.Label(selection_grid_frame, text="Primary", font=("Arial", 9, "bold")).grid(row=0, column=1, padx=5)
+        ttk.Label(selection_grid_frame, text="Ticket #", font=("Arial", 9, "bold")).grid(row=0, column=2, padx=5)
+        ttk.Label(selection_grid_frame, text="Description", font=("Arial", 9, "bold")).grid(row=0, column=3, padx=5)
+        ttk.Label(selection_grid_frame, text="Created", font=("Arial", 9, "bold")).grid(row=0, column=4, padx=5)
+        
+        for i, ticket in enumerate(self.all_tickets):
+            ticket_id = ticket.get('Number', f'ticket_{i}')
+            row = i + 1
+            
+            # Include checkbox
+            include_var = tk.BooleanVar(value=self.ticket_selection[ticket_id]['selected'])
+            self.ticket_vars[ticket_id] = include_var
+            include_cb = ttk.Checkbutton(
+                selection_grid_frame, 
+                variable=include_var,
+                command=self._on_selection_change
+            )
+            include_cb.grid(row=row, column=0, padx=5, pady=2)
+            
+            # Primary radio button
+            primary_rb = ttk.Radiobutton(
+                selection_grid_frame,
+                variable=self.primary_var,
+                value=ticket_id,
+                command=self._on_primary_change
+            )
+            primary_rb.grid(row=row, column=1, padx=5, pady=2)
+            
+            # Ticket number
+            ticket_num = ttk.Label(selection_grid_frame, text=ticket_id, font=("Arial", 9, "bold"))
+            ticket_num.grid(row=row, column=2, padx=5, pady=2, sticky="w")
+            
+            # Description (truncated)
+            desc = str(ticket.get('Short description', 'N/A'))[:50] + ("..." if len(desc) > 50 else "")
+            desc_label = ttk.Label(selection_grid_frame, text=desc)
+            desc_label.grid(row=row, column=3, padx=5, pady=2, sticky="w")
+            
+            # Created date
+            created = ticket.get('Created', 'N/A')
+            if hasattr(created, 'strftime') and created is not None and str(created) != 'NaT':
+                try:
+                    created_str = created.strftime("%Y-%m-%d %H:%M")
+                except (ValueError, AttributeError):
+                    created_str = str(created) if created is not None else 'N/A'
+            else:
+                created_str = str(created) if created is not None else 'N/A'
+            created_label = ttk.Label(selection_grid_frame, text=created_str)
+            created_label.grid(row=row, column=4, padx=5, pady=2, sticky="w")
+        
+        # Merge preview frame
+        self.preview_frame = ttk.LabelFrame(main_container, text="Merge Preview", padding=10)
+        self.preview_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        
+        # Create merge preview display
+        self.preview_text = scrolledtext.ScrolledText(
+            self.preview_frame, 
+            height=8, 
+            wrap=tk.WORD,
+            font=("Courier", 9)
+        )
+        self.preview_text.pack(fill=tk.BOTH, expand=True)
+        
+        # Update preview initially
+        self._update_merge_preview()
     
     def _create_details_view(self):
         """Create detailed view of all tickets"""
@@ -204,8 +265,11 @@ class DuplicateReviewDialog(tk.Toplevel):
             for key, value in ticket.items():
                 if key not in ['index']:  # Skip internal pandas fields
                     # Format datetime fields
-                    if hasattr(value, 'strftime'):
-                        value = value.strftime("%Y-%m-%d %H:%M:%S")
+                    if hasattr(value, 'strftime') and value is not None and str(value) != 'NaT':
+                        try:
+                            value = value.strftime("%Y-%m-%d %H:%M:%S")
+                        except (ValueError, AttributeError):
+                            value = str(value) if value is not None else 'N/A'
                     
                     details_text.insert(tk.END, f"{key}: {value}\n")
             
@@ -217,17 +281,38 @@ class DuplicateReviewDialog(tk.Toplevel):
         """Handle merge action"""
         notes = self.notes_text.get("1.0", tk.END).strip()
         
+        # Get selected tickets for merge
+        selected_tickets = [
+            tid for tid, sel in self.ticket_selection.items() 
+            if sel['selected']
+        ]
+        
+        if len(selected_tickets) < 2:
+            messagebox.showwarning("Invalid Selection", "Please select at least 2 tickets to merge.")
+            return
+        
+        # Get primary ticket ID
+        primary_ticket_id = self.primary_var.get()
+        if primary_ticket_id not in selected_tickets:
+            messagebox.showwarning("Invalid Primary", "Primary ticket must be included in merge selection.")
+            return
+        
         if not notes:
-            if not messagebox.askyesno("Confirm Merge", "No review notes provided. Continue with merge?"):
+            if not messagebox.askyesno("Confirm Merge", f"Merge {len(selected_tickets)} tickets into {primary_ticket_id}?\n\nNo review notes provided. Continue with merge?"):
+                return
+        else:
+            if not messagebox.askyesno("Confirm Merge", f"Merge {len(selected_tickets)} tickets into {primary_ticket_id}?"):
                 return
         
-        primary_ticket = self.duplicate_group.primary_ticket
-        duplicate_tickets = self.duplicate_group.duplicates
+        # Create result with detailed selection information
+        duplicate_ticket_ids = [tid for tid in selected_tickets if tid != primary_ticket_id]
         
         self.result = {
             "action": "merge",
-            "primary_ticket_id": str(primary_ticket.get("Number", "N/A")),
-            "duplicate_ticket_ids": [str(dup.get("Number", "N/A")) for dup in duplicate_tickets],
+            "primary_ticket_id": primary_ticket_id,
+            "duplicate_ticket_ids": duplicate_ticket_ids,
+            "selected_tickets": selected_tickets,
+            "ticket_selection": self.ticket_selection,
             "notes": notes,
             "confidence": self.duplicate_group.confidence_score
         }
@@ -266,6 +351,115 @@ class DuplicateReviewDialog(tk.Toplevel):
         """Handle cancel action"""
         self.result = None
         self.destroy()
+    
+    def _on_selection_change(self):
+        """Handle ticket selection change"""
+        # Update internal selection state
+        for ticket_id, var in self.ticket_vars.items():
+            self.ticket_selection[ticket_id]['selected'] = var.get()
+        
+        # Ensure at least one ticket is selected
+        selected_count = sum(1 for sel in self.ticket_selection.values() if sel['selected'])
+        if selected_count == 0:
+            # Re-enable the primary ticket if all are unchecked
+            primary_id = self.primary_var.get()
+            if primary_id in self.ticket_vars:
+                self.ticket_vars[primary_id].set(True)
+                self.ticket_selection[primary_id]['selected'] = True
+        
+        # Update merge preview
+        self._update_merge_preview()
+    
+    def _on_primary_change(self):
+        """Handle primary ticket selection change"""
+        new_primary = self.primary_var.get()
+        
+        # Update internal state
+        for ticket_id in self.ticket_selection:
+            self.ticket_selection[ticket_id]['is_primary'] = (ticket_id == new_primary)
+        
+        # Ensure primary ticket is selected
+        if new_primary in self.ticket_vars:
+            self.ticket_vars[new_primary].set(True)
+            self.ticket_selection[new_primary]['selected'] = True
+        
+        self.primary_ticket_id = new_primary
+        self._update_merge_preview()
+    
+    def _update_merge_preview(self):
+        """Update the merge preview display"""
+        self.preview_text.config(state=tk.NORMAL)
+        self.preview_text.delete(1.0, tk.END)
+        
+        # Get selected tickets
+        selected_tickets = [
+            self.ticket_selection[tid]['ticket_data'] 
+            for tid, sel in self.ticket_selection.items() 
+            if sel['selected']
+        ]
+        
+        if len(selected_tickets) == 0:
+            self.preview_text.insert(tk.END, "No tickets selected for merge.")
+            self.preview_text.config(state=tk.DISABLED)
+            return
+        
+        if len(selected_tickets) == 1:
+            self.preview_text.insert(tk.END, "Only one ticket selected - no merge will occur.")
+            self.preview_text.config(state=tk.DISABLED)
+            return
+        
+        # Get primary ticket
+        primary_ticket = None
+        for tid, sel in self.ticket_selection.items():
+            if sel['is_primary'] and sel['selected']:
+                primary_ticket = sel['ticket_data']
+                break
+        
+        if not primary_ticket:
+            self.preview_text.insert(tk.END, "No primary ticket selected.")
+            self.preview_text.config(state=tk.DISABLED)
+            return
+        
+        # Generate merge preview
+        preview_text = f"MERGE PREVIEW\n{'='*50}\n\n"
+        preview_text += f"Primary Ticket: {primary_ticket.get('Number', 'N/A')}\n"
+        preview_text += f"Site: {primary_ticket.get('Site', 'N/A')}\n"
+        preview_text += f"Priority: {primary_ticket.get('Priority', 'N/A')}\n"
+        
+        # Use earliest created date
+        created_dates = [t.get('Created') for t in selected_tickets if t.get('Created')]
+        if created_dates:
+            earliest_date = min(created_dates)
+            if hasattr(earliest_date, 'strftime') and earliest_date is not None and str(earliest_date) != 'NaT':
+                try:
+                    preview_text += f"Created: {earliest_date.strftime('%Y-%m-%d %H:%M')} (earliest)\n"
+                except (ValueError, AttributeError):
+                    preview_text += f"Created: {earliest_date} (earliest)\n"
+        
+        # Combine descriptions
+        descriptions = []
+        for i, ticket in enumerate(selected_tickets):
+            ticket_id = ticket.get('Number', f'Ticket {i+1}')
+            desc = ticket.get('Short description', 'No description')
+            created = ticket.get('Created')
+            if hasattr(created, 'strftime') and created is not None and str(created) != 'NaT':
+                try:
+                    timestamp = created.strftime('%Y-%m-%d %H:%M')
+                except (ValueError, AttributeError):
+                    timestamp = str(created) if created is not None else 'N/A'
+                descriptions.append(f"[{ticket_id} - {timestamp}] {desc}")
+            else:
+                descriptions.append(f"[{ticket_id}] {desc}")
+        
+        preview_text += f"\nCombined Description:\n{'-'*30}\n"
+        preview_text += "\n\n".join(descriptions)
+        
+        preview_text += f"\n\n{'='*50}\n"
+        preview_text += f"Tickets to be merged: {len(selected_tickets)}\n"
+        preview_text += f"Tickets to be marked inactive: {len(selected_tickets) - 1}"
+        
+        self.preview_text.insert(tk.END, preview_text)
+        self.preview_text.config(state=tk.DISABLED)
 
 class DataQualityTab(ttk.Frame):
     """Data Quality Management tab for the main application"""
@@ -329,6 +523,25 @@ class DataQualityTab(ttk.Frame):
             state="disabled"
         )
         self.auto_process_btn.pack(side=tk.LEFT, padx=(10, 0))
+        
+        # Apply Changes button - processes pending manual review decisions
+        self.apply_changes_btn = ttk.Button(
+            action_frame,
+            text="✅ Apply Changes",
+            command=self._on_apply_changes,
+            state="disabled",
+            style="Accent.TButton"
+        )
+        self.apply_changes_btn.pack(side=tk.LEFT, padx=(10, 0))
+        
+        # Pending changes counter
+        self.pending_changes_label = ttk.Label(
+            action_frame,
+            text="",
+            font=("Arial", 9),
+            foreground="orange"
+        )
+        self.pending_changes_label.pack(side=tk.LEFT, padx=(5, 0))
         
         self.export_log_btn = ttk.Button(
             action_frame,
@@ -505,6 +718,20 @@ class DataQualityTab(ttk.Frame):
         if 'export_audit_log' in self.callbacks:
             self.callbacks['export_audit_log']()
     
+    def _on_apply_changes(self):
+        """Handle apply pending manual review changes"""
+        if 'apply_manual_changes' in self.callbacks:
+            # Show confirmation dialog with details
+            if messagebox.askyesno(
+                "Apply Manual Review Changes",
+                "This will apply all pending manual review decisions and reprocess the data.\n\n"
+                "• Merge decisions will consolidate selected tickets\n"
+                "• Dismissed groups will be removed from review queue\n"
+                "• All reports and statistics will be updated\n\n"
+                "This action cannot be undone. Continue?"
+            ):
+                self.callbacks['apply_manual_changes']()
+    
     def _on_filter_change(self, event=None):
         """Handle duplicate queue filter change"""
         self._refresh_duplicate_queue()
@@ -652,3 +879,12 @@ RECOMMENDATIONS
         dialog = DuplicateReviewDialog(self, duplicate_group)
         self.wait_window(dialog)
         return dialog.result
+    
+    def update_pending_changes(self, count: int):
+        """Update the pending changes counter"""
+        if count > 0:
+            self.pending_changes_label.config(text=f"({count} pending)")
+            self.apply_changes_btn.config(state="normal")
+        else:
+            self.pending_changes_label.config(text="")
+            self.apply_changes_btn.config(state="disabled")

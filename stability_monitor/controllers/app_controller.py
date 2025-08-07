@@ -355,10 +355,18 @@ class AppController:
             )
             
             # Log analytics generation
-            self.audit_manager.log_action(
-                AuditAction.REPORT_GENERATED,
-                f"Enhanced {title} generated with {len(filtered_data)} tickets and drill-down evidence"
+            from datetime import datetime
+            import uuid
+            audit_action = AuditAction(
+                action_id=str(uuid.uuid4()),
+                action_type="report_generated",
+                user="system",
+                timestamp=datetime.now(),
+                description=f"Enhanced {title} generated with {len(filtered_data)} tickets and drill-down evidence",
+                details={"report_type": report_type, "ticket_count": len(filtered_data)},
+                affected_tickets=[]
             )
+            self.audit_manager.log_action(audit_action)
             
             self.main_window.set_status(f"Enhanced {title} generated with evidence view")
             
