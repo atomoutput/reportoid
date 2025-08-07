@@ -3,7 +3,7 @@ Data validation utilities
 """
 
 import pandas as pd
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Any
 
 class DataValidator:
     """Validates and reports on data quality"""
@@ -12,7 +12,7 @@ class DataValidator:
         self.required_columns = required_columns or ["Site", "Priority", "Created", "Company"]
         self.priority_values = ["1 - Critical", "2 - High", "3 - Medium", "4 - Low"]
     
-    def validate_dataframe(self, df: pd.DataFrame) -> Dict[str, any]:
+    def validate_dataframe(self, df: pd.DataFrame) -> Dict[str, Any]:
         """Comprehensive validation of the loaded dataframe"""
         results = {
             "valid": True,

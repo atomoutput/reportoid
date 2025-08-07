@@ -217,14 +217,9 @@ class DuplicateReviewDialog(tk.Toplevel):
             desc_label.grid(row=row, column=3, padx=5, pady=2, sticky="w")
             
             # Created date
+            from ..utils.date_utils import safe_date_display
             created = ticket.get('Created', 'N/A')
-            if hasattr(created, 'strftime') and created is not None and str(created) != 'NaT':
-                try:
-                    created_str = created.strftime("%Y-%m-%d %H:%M")
-                except (ValueError, AttributeError):
-                    created_str = str(created) if created is not None else 'N/A'
-            else:
-                created_str = str(created) if created is not None else 'N/A'
+            created_str = safe_date_display(created)
             created_label = ttk.Label(selection_grid_frame, text=created_str)
             created_label.grid(row=row, column=4, padx=5, pady=2, sticky="w")
         

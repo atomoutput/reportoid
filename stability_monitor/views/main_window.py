@@ -552,9 +552,15 @@ class MainWindow:
     def _on_total_sites_changed(self, event=None):
         """Handle total sites count change"""
         try:
-            new_total = int(self.total_sites_var.get())
-            if new_total <= 0:
-                raise ValueError("Total sites must be positive")
+            total_sites_str = self.total_sites_var.get().strip()
+            if not total_sites_str:
+                raise ValueError("Total sites cannot be empty")
+                
+            new_total = int(total_sites_str)
+            if new_total < 0:
+                raise ValueError("Total sites cannot be negative")
+            elif new_total > 10000:
+                raise ValueError("Total sites cannot exceed 10,000")
                 
             # Update settings
             self.settings.set("stability_analysis.total_supported_sites.count", new_total)

@@ -5,7 +5,7 @@ Audit Trail System for tracking manual data quality corrections and reviews
 import json
 import sqlite3
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 import logging
 
@@ -379,4 +379,3 @@ class AuditTrailManager:
             self.logger.error(f"Failed to export audit log: {e}")
             return False
 
-from datetime import timedelta  # Add missing import

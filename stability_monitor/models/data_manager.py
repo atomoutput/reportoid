@@ -337,7 +337,7 @@ class DataManager:
     
     def get_duplicate_groups(self):
         """Get detected duplicate groups for manual review"""
-        if not self.quality_data is None:
+        if self.quality_data is not None:
             return self.quality_manager.detect_duplicates(self.data)
         return []
     
