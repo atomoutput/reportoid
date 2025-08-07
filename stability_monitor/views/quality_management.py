@@ -7,6 +7,7 @@ from tkinter import ttk, messagebox, scrolledtext
 from typing import Dict, List, Any, Callable, Optional
 from datetime import datetime
 import json
+import pandas as pd
 
 class DuplicateReviewDialog(tk.Toplevel):
     """Dialog for reviewing and managing duplicate ticket groups"""
@@ -246,8 +247,6 @@ class DuplicateReviewDialog(tk.Toplevel):
     def _safe_get_scalar(self, value):
         """Safely extract scalar value from pandas Series or other objects"""
         try:
-            import pandas as pd
-            
             if value is None:
                 return None
                 
@@ -289,8 +288,6 @@ class DuplicateReviewDialog(tk.Toplevel):
     def _safe_bool_check(self, obj, check_type="any"):
         """Safely check boolean value of pandas objects to avoid Series ambiguity"""
         try:
-            import pandas as pd
-            
             if obj is None:
                 return False
                 
