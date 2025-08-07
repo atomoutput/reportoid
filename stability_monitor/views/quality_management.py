@@ -185,12 +185,13 @@ class DuplicateReviewDialog(tk.Toplevel):
         ttk.Label(selection_grid_frame, text="Created", font=("Arial", 9, "bold")).grid(row=0, column=4, padx=5)
         
         for i, ticket in enumerate(self.all_tickets):
-            ticket_id = ticket.get('Number', f'ticket_{i}')
+            # Safely extract ticket ID to avoid Series ambiguity
+            ticket_id = self._safe_get_scalar(ticket.get('Number', f'ticket_{i}'))
             row = i + 1
             
             # Include checkbox
-            include_var = tk.BooleanVar(value=self.ticket_selection[ticket_id]['selected'])
-            self.ticket_vars[ticket_id] = include_var
+            include_var = tk.BooleanVar(value=self.ticket_selection.get(str(ticket_id), {'selected': True})['selected'])
+            self.ticket_vars[str(ticket_id)] = include_var
             include_cb = ttk.Checkbutton(
                 selection_grid_frame, 
                 variable=include_var,
@@ -202,25 +203,25 @@ class DuplicateReviewDialog(tk.Toplevel):
             primary_rb = ttk.Radiobutton(
                 selection_grid_frame,
                 variable=self.primary_var,
-                value=ticket_id,
+                value=str(ticket_id),
                 command=self._on_primary_change
             )
             primary_rb.grid(row=row, column=1, padx=5, pady=2)
             
             # Ticket number
-            ticket_num = ttk.Label(selection_grid_frame, text=ticket_id, font=("Arial", 9, "bold"))
+            ticket_num = ttk.Label(selection_grid_frame, text=str(ticket_id), font=("Arial", 9, "bold"))
             ticket_num.grid(row=row, column=2, padx=5, pady=2, sticky="w")
             
-            # Description (truncated)
-            desc_raw = ticket.get('Short description', 'N/A')
+            # Description (truncated) - safely extract scalar
+            desc_raw = self._safe_get_scalar(ticket.get('Short description', 'N/A'))
             desc_full = str(desc_raw) if desc_raw is not None else 'N/A'
             desc = desc_full[:50] + ("..." if len(desc_full) > 50 else "")
             desc_label = ttk.Label(selection_grid_frame, text=desc)
             desc_label.grid(row=row, column=3, padx=5, pady=2, sticky="w")
             
-            # Created date
+            # Created date - safely extract scalar
             from ..utils.date_utils import safe_date_display
-            created = ticket.get('Created', 'N/A')
+            created = self._safe_get_scalar(ticket.get('Created', 'N/A'))
             created_str = safe_date_display(created)
             created_label = ttk.Label(selection_grid_frame, text=created_str)
             created_label.grid(row=row, column=4, padx=5, pady=2, sticky="w")
@@ -240,6 +241,75 @@ class DuplicateReviewDialog(tk.Toplevel):
         
         # Update preview initially
         self._update_merge_preview()
+    
+    def _safe_get_scalar(self, value):
+        """Safely extract scalar value from pandas Series or other objects"""
+        try:
+            import pandas as pd
+            
+            if value is None:
+                return None
+                
+            # Handle pandas Series
+            if isinstance(value, pd.Series):
+                if len(value) == 0:
+                    return None  # Empty Series
+                elif len(value) == 1:
+                    return value.iloc[0]  # Single item Series
+                else:
+                    return value.iloc[0]  # Multi-item Series, take first
+            
+            # Handle other pandas objects
+            if hasattr(value, 'item'):
+                try:
+                    return value.item()
+                except ValueError:
+                    # item() failed, try iloc
+                    if hasattr(value, 'iloc') and len(value) > 0:
+                        return value.iloc[0]
+                    return str(value)
+            
+            # Handle numpy arrays
+            if hasattr(value, 'shape') and value.shape == ():
+                return value.item()
+            elif hasattr(value, 'shape') and len(value) > 0:
+                return value[0]
+                
+            # Return as-is for regular Python objects
+            return value
+                
+        except Exception as e:
+            # If anything fails, return string representation
+            try:
+                return str(value) if value is not None else None
+            except:
+                return None
+    
+    def _safe_bool_check(self, obj, check_type="any"):
+        """Safely check boolean value of pandas objects to avoid Series ambiguity"""
+        try:
+            import pandas as pd
+            
+            if obj is None:
+                return False
+                
+            # Handle pandas Series/DataFrame
+            if isinstance(obj, (pd.Series, pd.DataFrame)):
+                if check_type == "any":
+                    return obj.any() if not obj.empty else False
+                elif check_type == "all":
+                    return obj.all() if not obj.empty else False
+                elif check_type == "empty":
+                    return obj.empty
+                else:  # default to any()
+                    return obj.any() if not obj.empty else False
+            
+            # Handle regular Python objects
+            return bool(obj)
+            
+        except Exception:
+            # If anything fails, return False for safety
+            return False
     
     def _create_details_view(self):
         """Create detailed view of all tickets"""
@@ -261,14 +331,17 @@ class DuplicateReviewDialog(tk.Toplevel):
             
             for key, value in ticket.items():
                 if key not in ['index']:  # Skip internal pandas fields
-                    # Format datetime fields
-                    if hasattr(value, 'strftime') and value is not None and str(value) != 'NaT':
-                        try:
-                            value = value.strftime("%Y-%m-%d %H:%M:%S")
-                        except (ValueError, AttributeError):
-                            value = str(value) if value is not None else 'N/A'
+                    # Safely extract scalar value
+                    safe_value = self._safe_get_scalar(value)
                     
-                    details_text.insert(tk.END, f"{key}: {value}\n")
+                    # Format datetime fields
+                    if hasattr(safe_value, 'strftime') and safe_value is not None and str(safe_value) != 'NaT':
+                        try:
+                            safe_value = safe_value.strftime("%Y-%m-%d %H:%M:%S")
+                        except (ValueError, AttributeError):
+                            safe_value = str(safe_value) if safe_value is not None else 'N/A'
+                    
+                    details_text.insert(tk.END, f"{key}: {safe_value}\n")
             
             details_text.insert(tk.END, "\n")
         
@@ -417,14 +490,22 @@ class DuplicateReviewDialog(tk.Toplevel):
             self.preview_text.config(state=tk.DISABLED)
             return
         
-        # Generate merge preview
+        # Generate merge preview - safely extract scalar values
         preview_text = f"MERGE PREVIEW\n{'='*50}\n\n"
-        preview_text += f"Primary Ticket: {primary_ticket.get('Number', 'N/A')}\n"
-        preview_text += f"Site: {primary_ticket.get('Site', 'N/A')}\n"
-        preview_text += f"Priority: {primary_ticket.get('Priority', 'N/A')}\n"
+        preview_text += f"Primary Ticket: {self._safe_get_scalar(primary_ticket.get('Number', 'N/A'))}\n"
+        preview_text += f"Site: {self._safe_get_scalar(primary_ticket.get('Site', 'N/A'))}\n"
+        preview_text += f"Priority: {self._safe_get_scalar(primary_ticket.get('Priority', 'N/A'))}\n"
         
-        # Use earliest created date
-        created_dates = [t.get('Created') for t in selected_tickets if t.get('Created')]
+        # Use earliest created date - safely handle potential Series
+        created_dates = []
+        for t in selected_tickets:
+            created = t.get('Created')
+            if created is not None and not pd.isna(created):
+                # Ensure we get scalar value, not Series
+                created_val = self._safe_get_scalar(created)
+                if created_val is not None and not pd.isna(created_val):
+                    created_dates.append(created_val)
+        
         if created_dates:
             earliest_date = min(created_dates)
             if hasattr(earliest_date, 'strftime') and earliest_date is not None and str(earliest_date) != 'NaT':
@@ -433,12 +514,13 @@ class DuplicateReviewDialog(tk.Toplevel):
                 except (ValueError, AttributeError):
                     preview_text += f"Created: {earliest_date} (earliest)\n"
         
-        # Combine descriptions
+        # Combine descriptions - safely extract scalar values
         descriptions = []
         for i, ticket in enumerate(selected_tickets):
-            ticket_id = ticket.get('Number', f'Ticket {i+1}')
-            desc = ticket.get('Short description', 'No description')
-            created = ticket.get('Created')
+            ticket_id = self._safe_get_scalar(ticket.get('Number', f'Ticket {i+1}'))
+            desc = self._safe_get_scalar(ticket.get('Short description', 'No description'))
+            created = self._safe_get_scalar(ticket.get('Created'))
+            
             if hasattr(created, 'strftime') and created is not None and str(created) != 'NaT':
                 try:
                     timestamp = created.strftime('%Y-%m-%d %H:%M')

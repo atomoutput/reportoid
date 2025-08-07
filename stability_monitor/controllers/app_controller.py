@@ -1401,7 +1401,13 @@ class AppController:
                 messagebox.showinfo("Decision Pending", message)
                 
         except Exception as e:
-            messagebox.showerror("Review Error", f"Failed to review duplicate group:\n{str(e)}")
+            import traceback
+            error_details = f"Failed to review duplicate group:\n{str(e)}\n\nFull traceback:\n{traceback.format_exc()}"
+            self.logger.error(f"Duplicate review error: {error_details}")
+            
+            # Show shorter message to user but log full details
+            messagebox.showerror("Review Error", 
+                f"Failed to review duplicate group:\n{str(e)}\n\nCheck logs for full details.")
     
     def _handle_batch_process_duplicates(self, group_ids: List[str]):
         """Handle batch processing of multiple duplicate groups"""
