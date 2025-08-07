@@ -853,12 +853,37 @@ class MainWindow:
         if correlations:
             display_data.append(["Site Correlations Detected", "Yes", "Strong correlations found between sites indicating shared dependencies"])
         
-        # Peak incident times
-        peak_times = pattern_results.get('peak_incident_times', [])
+        # Peak incident times - fix dictionary slicing error
+        peak_times = pattern_results.get('peak_incident_times', {})  # Expect dict, not list
         if peak_times:
             display_data.append(["--- INCIDENT PATTERNS ---", "", ""])
-            for time_pattern in peak_times[:3]:  # Show top 3 patterns
-                display_data.append([f"Peak Time: {time_pattern.get('time_range', 'Unknown')}", f"{time_pattern.get('incident_count', 0)} incidents", f"Common pattern: {time_pattern.get('pattern_description', 'N/A')}"])
+            
+            # Display peak hour if available
+            if 'peak_hour' in peak_times:
+                peak_hour = peak_times['peak_hour']
+                display_data.append([
+                    f"Peak Hour: {peak_hour.get('hour', 0):02d}:00", 
+                    f"{peak_hour.get('count', 0)} incidents", 
+                    f"{peak_hour.get('percentage', 0):.1f}% of total incidents"
+                ])
+            
+            # Display peak day if available  
+            if 'peak_day' in peak_times:
+                peak_day = peak_times['peak_day']
+                display_data.append([
+                    f"Peak Day: {peak_day.get('day', 'Unknown')}s", 
+                    f"{peak_day.get('count', 0)} incidents", 
+                    f"{peak_day.get('percentage', 0):.1f}% of total incidents"
+                ])
+                
+            # Display peak month if available
+            if 'peak_month' in peak_times:
+                peak_month = peak_times['peak_month']
+                display_data.append([
+                    f"Peak Month: {peak_month.get('month', 'Unknown')}", 
+                    f"{peak_month.get('count', 0)} incidents", 
+                    f"{peak_month.get('percentage', 0):.1f}% of total incidents"
+                ])
     
     def _build_stability_insights_data(self, analytics_data: dict, display_data: list):
         """Build display data for stability insights"""

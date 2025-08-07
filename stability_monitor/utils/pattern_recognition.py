@@ -250,7 +250,8 @@ class TimePatternEngine:
                 
                 # If one day has significantly more incidents than average
                 if max_day_count > avg_day_count * 2 and max_day_count >= 3:
-                    peak_day = site_weekly[site_weekly['Count'] == max_day_count]['DayOfWeek'].iloc[0]
+                    matching_days = site_weekly[site_weekly['Count'] == max_day_count]['DayOfWeek']
+                    peak_day = matching_days.iloc[0] if len(matching_days) > 0 else 0
                     day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
                     
                     pattern = TemporalPattern(
@@ -316,36 +317,41 @@ class TimePatternEngine:
         df_copy['DayOfWeek'] = df_copy['Created'].dt.dayofweek
         df_copy['Month'] = df_copy['Created'].dt.month
         
-        # Hourly distribution
+        # Hourly distribution - safe empty series handling
         hourly_counts = df_copy['Hour'].value_counts().sort_index()
-        peak_hour = hourly_counts.idxmax()
+        peak_hour = hourly_counts.idxmax() if len(hourly_counts) > 0 else 0
         
-        # Daily distribution  
+        # Daily distribution - safe empty series handling
         day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
         daily_counts = df_copy['DayOfWeek'].value_counts().sort_index()
-        peak_day = day_names[daily_counts.idxmax()]
+        peak_day_idx = daily_counts.idxmax() if len(daily_counts) > 0 else 0
+        peak_day = day_names[peak_day_idx] if peak_day_idx < len(day_names) else 'Monday'
         
-        # Monthly distribution
+        # Monthly distribution - safe empty series handling
         month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
                       'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
         monthly_counts = df_copy['Month'].value_counts().sort_index()
-        peak_month = month_names[monthly_counts.idxmax() - 1] if len(monthly_counts) > 0 else 'Unknown'
+        if len(monthly_counts) > 0:
+            peak_month_idx = monthly_counts.idxmax() - 1
+            peak_month = month_names[peak_month_idx] if 0 <= peak_month_idx < len(month_names) else 'Jan'
+        else:
+            peak_month = 'Jan'
         
         return {
             'peak_hour': {
                 'hour': peak_hour,
                 'count': hourly_counts.loc[peak_hour] if peak_hour in hourly_counts.index else 0,
-                'percentage': ((hourly_counts.loc[peak_hour] if peak_hour in hourly_counts.index else 0) / len(df_copy)) * 100
+                'percentage': ((hourly_counts.loc[peak_hour] if peak_hour in hourly_counts.index else 0) / len(df_copy)) * 100 if len(df_copy) > 0 else 0
             },
             'peak_day': {
                 'day': peak_day,
-                'count': daily_counts.max(),
-                'percentage': (daily_counts.max() / len(df_copy)) * 100
+                'count': daily_counts.max() if len(daily_counts) > 0 else 0,
+                'percentage': ((daily_counts.max() if len(daily_counts) > 0 else 0) / len(df_copy)) * 100 if len(df_copy) > 0 else 0
             },
             'peak_month': {
                 'month': peak_month,
                 'count': monthly_counts.max() if len(monthly_counts) > 0 else 0,
-                'percentage': ((monthly_counts.max() if len(monthly_counts) > 0 else 0) / len(df_copy)) * 100
+                'percentage': ((monthly_counts.max() if len(monthly_counts) > 0 else 0) / len(df_copy)) * 100 if len(df_copy) > 0 else 0
             },
             'hourly_distribution': hourly_counts.to_dict(),
             'daily_distribution': daily_counts.to_dict(),

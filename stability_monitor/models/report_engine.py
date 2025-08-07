@@ -220,12 +220,20 @@ class ReportEngine:
         best_worst = []
         for company in company_stats["Company"]:
             sites = site_performance[site_performance["Company"] == company]
-            if not sites.empty:
-                # Best site: lowest critical incidents, then lowest MTTR
-                best_site = sites.loc[sites["Is_Critical"].idxmin(), "Site"]
-                # Worst site: highest critical incidents, then highest MTTR
-                worst_site = sites.loc[sites["Is_Critical"].idxmax(), "Site"]
-                best_worst.append((company, best_site, worst_site))
+            if not sites.empty and len(sites) > 0:
+                try:
+                    # Best site: lowest critical incidents, then lowest MTTR
+                    best_site = sites.loc[sites["Is_Critical"].idxmin(), "Site"]
+                    # Worst site: highest critical incidents, then highest MTTR
+                    worst_site = sites.loc[sites["Is_Critical"].idxmax(), "Site"]
+                    best_worst.append((company, best_site, worst_site))
+                except (ValueError, KeyError, IndexError):
+                    # Handle empty series or missing data gracefully
+                    if len(sites) > 0:
+                        first_site = sites.iloc[0]["Site"]
+                        best_worst.append((company, first_site, first_site))
+                    else:
+                        best_worst.append((company, "N/A", "N/A"))
         
         best_worst_df = pd.DataFrame(best_worst, columns=["Company", "Best_Site", "Worst_Site"])
         
