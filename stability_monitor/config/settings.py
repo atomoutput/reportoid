@@ -58,13 +58,13 @@ class Settings:
                 },
                 "duplicate_detection": {
                     "enabled": True,
-                    "similarity_threshold": 0.8,
+                    "similarity_threshold": 0.7,      # Lowered from 0.8 due to better focus
                     "date_window_hours": 24,
-                    "priority_levels": ["1 - Critical"],
-                    "description_weight": 0.4,
-                    "site_weight": 0.3,
-                    "date_weight": 0.2,
-                    "priority_weight": 0.1
+                    "priority_levels": ["1 - Critical", "2 - High"],  # Expanded scope
+                    "description_weight": 0.6,        # Increased from 0.4
+                    "date_weight": 0.3,               # Increased from 0.2  
+                    "priority_weight": 0.1            # Same
+                    # Note: Removed site_weight - duplicates are site-specific only
                 },
                 "auto_review": {
                     "high_confidence_threshold": 0.95,
@@ -81,7 +81,13 @@ class Settings:
                     "availability_target": 99.5
                 },
                 "trend_analysis_days": 30,
-                "weight_by_volume": True
+                "weight_by_volume": True,
+                "total_supported_sites": {
+                    "enabled": True,
+                    "count": 250,  # Default: 250 total sites under support
+                    "last_updated": None,
+                    "notes": "Total number of sites under IT support coverage"
+                }
             },
             "pattern_analysis": {
                 "sync_time_window_minutes": 30,

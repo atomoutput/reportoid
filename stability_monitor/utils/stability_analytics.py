@@ -22,6 +22,14 @@ class StabilityMetrics:
         self.site_performance_distribution = {}
         self.time_based_metrics = {}
         
+        # Portfolio-wide metrics (new)
+        self.portfolio_stability_percentage = 0.0  # % of total supported sites with no criticals
+        self.total_supported_sites = 0
+        self.sites_with_incidents = 0
+        self.sites_with_critical_incidents = 0
+        self.sites_with_zero_incidents = 0
+        self.portfolio_coverage_percentage = 0.0  # % of supported sites that had any activity
+        
 class SystemStabilityAnalyzer:
     """Analyzes system-wide stability metrics and performance trends"""
     
@@ -43,6 +51,20 @@ class SystemStabilityAnalyzer:
             "weight_by_volume": True
         })
     
+    def _ensure_critical_column(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Ensure Is_Critical column exists, create from Priority if needed"""
+        if df.empty:
+            return df
+        
+        df = df.copy()
+        if 'Is_Critical' not in df.columns and 'Priority' in df.columns:
+            df['Is_Critical'] = df['Priority'].str.contains('Critical', case=False, na=False)
+        elif 'Is_Critical' not in df.columns:
+            # If no Priority column either, create default False column
+            df['Is_Critical'] = False
+        
+        return df
+    
     def calculate_system_stability(self, df: pd.DataFrame) -> StabilityMetrics:
         """
         Calculate comprehensive system stability metrics
@@ -50,10 +72,16 @@ class SystemStabilityAnalyzer:
         if df.empty:
             return StabilityMetrics()
         
+        # Ensure Is_Critical column exists
+        df = self._ensure_critical_column(df)
+        
         metrics = StabilityMetrics()
         
         # Overall stability percentage (sites with no critical incidents / total sites)
         metrics.overall_stability_percentage = self._calculate_overall_stability_percentage(df)
+        
+        # Portfolio-wide stability metrics (NEW)
+        self._calculate_portfolio_metrics(df, metrics)
         
         # Weighted stability score (considers ticket volumes per site)
         metrics.weighted_stability_score = self._calculate_weighted_stability_score(df)
@@ -82,15 +110,91 @@ class SystemStabilityAnalyzer:
         return metrics
     
     def _calculate_overall_stability_percentage(self, df: pd.DataFrame) -> float:
-        """Calculate percentage of sites with no critical incidents"""
-        site_critical_counts = df.groupby('Site')['Is_Critical'].sum()
-        stable_sites = (site_critical_counts == 0).sum()
-        total_sites = len(site_critical_counts)
-        
-        if total_sites == 0:
+        """
+        Calculate percentage of total supported sites with no critical incidents
+        This now uses the configured total sites count for accurate portfolio metrics
+        """
+        if df.empty:
+            # If no data, all supported sites are stable (perfect score)
             return 100.0
         
-        return (stable_sites / total_sites) * 100.0
+        # Get total supported sites from configuration
+        total_supported_sites = self.settings.get("stability_analysis.total_supported_sites.count", 0)
+        
+        if total_supported_sites <= 0:
+            # Fall back to old method if total sites not configured
+            site_critical_counts = df.groupby('Site')['Is_Critical'].sum()
+            stable_sites = (site_critical_counts == 0).sum()
+            total_sites = len(site_critical_counts)
+            return (stable_sites / total_sites * 100.0) if total_sites > 0 else 100.0
+        
+        # Count sites with critical incidents
+        site_critical_counts = df.groupby('Site')['Is_Critical'].sum()
+        sites_with_criticals = (site_critical_counts > 0).sum()
+        
+        # Calculate sites with NO critical incidents
+        # Total supported sites minus sites that appear in data with criticals
+        sites_with_no_criticals = total_supported_sites - sites_with_criticals
+        
+        # Portfolio stability percentage
+        portfolio_stability = (sites_with_no_criticals / total_supported_sites) * 100.0
+        
+        return max(0.0, min(100.0, portfolio_stability))
+    
+    def _calculate_portfolio_metrics(self, df: pd.DataFrame, metrics: StabilityMetrics) -> None:
+        """
+        Calculate comprehensive portfolio-wide stability metrics
+        Populates portfolio metrics fields in the provided metrics object
+        """
+        if df.empty:
+            # Set default values for empty dataset
+            metrics.total_supported_sites = self.settings.get("stability_analysis.total_supported_sites.count", 0)
+            metrics.sites_with_incidents = 0
+            metrics.sites_with_critical_incidents = 0
+            metrics.sites_with_zero_incidents = metrics.total_supported_sites
+            metrics.portfolio_coverage_percentage = 0.0
+            metrics.portfolio_stability_percentage = 100.0
+            return
+        
+        # Get total supported sites from configuration
+        total_supported_sites = self.settings.get("stability_analysis.total_supported_sites.count", 0)
+        metrics.total_supported_sites = total_supported_sites
+        
+        # Calculate site-based metrics from actual data
+        site_stats = df.groupby('Site').agg({
+            'Number': 'count',        # Total tickets per site
+            'Is_Critical': 'sum'      # Critical tickets per site
+        })
+        
+        # Sites that appear in the data (have any activity)
+        sites_with_any_activity = set(site_stats.index)
+        metrics.sites_with_incidents = len(sites_with_any_activity)
+        
+        # Sites with critical incidents
+        sites_with_criticals = site_stats[site_stats['Is_Critical'] > 0]
+        metrics.sites_with_critical_incidents = len(sites_with_criticals)
+        
+        # Calculate portfolio metrics
+        if total_supported_sites > 0:
+            # Sites with zero incidents = total supported - sites with criticals
+            # This assumes sites not in data have zero incidents
+            metrics.sites_with_zero_incidents = total_supported_sites - metrics.sites_with_critical_incidents
+            
+            # Portfolio coverage: what percentage of supported sites had any activity
+            metrics.portfolio_coverage_percentage = (metrics.sites_with_incidents / total_supported_sites) * 100.0
+            
+            # Portfolio stability: what percentage of ALL supported sites have no critical incidents
+            metrics.portfolio_stability_percentage = (metrics.sites_with_zero_incidents / total_supported_sites) * 100.0
+        else:
+            # Fall back to data-only calculations
+            sites_without_criticals = site_stats[site_stats['Is_Critical'] == 0]
+            metrics.sites_with_zero_incidents = len(sites_without_criticals)
+            metrics.portfolio_coverage_percentage = 100.0  # All data sites are covered
+            metrics.portfolio_stability_percentage = (len(sites_without_criticals) / len(sites_with_any_activity)) * 100.0 if len(sites_with_any_activity) > 0 else 100.0
+        
+        # Ensure values are within valid ranges
+        metrics.portfolio_coverage_percentage = max(0.0, min(100.0, metrics.portfolio_coverage_percentage))
+        metrics.portfolio_stability_percentage = max(0.0, min(100.0, metrics.portfolio_stability_percentage))
     
     def _calculate_weighted_stability_score(self, df: pd.DataFrame) -> float:
         """
@@ -99,6 +203,8 @@ class SystemStabilityAnalyzer:
         """
         if not self.stability_config.get("weight_by_volume", True):
             return self._calculate_overall_stability_percentage(df)
+        
+        df = self._ensure_critical_column(df)
         
         site_stats = df.groupby('Site').agg({
             'Number': 'count',        # Total tickets per site
@@ -126,6 +232,7 @@ class SystemStabilityAnalyzer:
         if df.empty:
             return 0.0
         
+        df = self._ensure_critical_column(df)
         return (df['Is_Critical'].sum() / len(df)) * 100.0
     
     def _calculate_system_mttr(self, df: pd.DataFrame) -> float:
@@ -150,6 +257,8 @@ class SystemStabilityAnalyzer:
         # Get time span of data
         if 'Created' not in df.columns:
             return 100.0
+        
+        df = self._ensure_critical_column(df)
         
         date_range = df['Created'].max() - df['Created'].min()
         total_hours = date_range.total_seconds() / 3600 if date_range.total_seconds() > 0 else 1
@@ -185,6 +294,8 @@ class SystemStabilityAnalyzer:
         """
         if df.empty or 'Created' not in df.columns:
             return 'stable'
+        
+        df = self._ensure_critical_column(df)
         
         trend_days = self.stability_config.get("trend_analysis_days", 30)
         
@@ -272,6 +383,8 @@ class SystemStabilityAnalyzer:
     
     def _analyze_site_performance_distribution(self, df: pd.DataFrame) -> Dict[str, Any]:
         """Analyze distribution of site performance levels"""
+        df = self._ensure_critical_column(df)
+        
         site_stats = df.groupby('Site').agg({
             'Number': 'count',
             'Is_Critical': 'sum'
@@ -311,9 +424,15 @@ class SystemStabilityAnalyzer:
         if df.empty or 'Created' not in df.columns:
             return {}
         
+        df = self._ensure_critical_column(df)
+        
         # Daily metrics for last 30 days
         df_copy = df.copy()
         df_copy['Date'] = df_copy['Created'].dt.date
+        
+        # Create Is_Resolved column if it doesn't exist
+        if 'Is_Resolved' not in df_copy.columns:
+            df_copy['Is_Resolved'] = df_copy['Resolved'].notna()
         
         daily_metrics = df_copy.groupby('Date').agg({
             'Number': 'count',
@@ -360,13 +479,28 @@ class SystemStabilityAnalyzer:
         """Generate actionable insights based on stability metrics"""
         insights = []
         
-        # Overall stability insights
-        if metrics.overall_stability_percentage >= 95:
-            insights.append("🟢 Excellent system stability with 95%+ of sites running without critical incidents")
-        elif metrics.overall_stability_percentage >= 85:
-            insights.append("🟡 Good system stability, but some sites experiencing critical issues")
+        # Portfolio-wide stability insights (NEW)
+        if metrics.total_supported_sites > 0:
+            if metrics.portfolio_stability_percentage >= 95:
+                insights.append(f"🟢 Excellent portfolio stability: {metrics.portfolio_stability_percentage:.1f}% of all {metrics.total_supported_sites} supported sites have zero critical incidents")
+            elif metrics.portfolio_stability_percentage >= 85:
+                insights.append(f"🟡 Good portfolio stability: {metrics.portfolio_stability_percentage:.1f}% of {metrics.total_supported_sites} supported sites stable, but {metrics.sites_with_critical_incidents} sites need attention")
+            else:
+                insights.append(f"🔴 Portfolio stability needs immediate attention: Only {metrics.portfolio_stability_percentage:.1f}% of {metrics.total_supported_sites} supported sites are stable")
+            
+            # Coverage insights
+            if metrics.portfolio_coverage_percentage < 50:
+                insights.append(f"📊 Data coverage: Only {metrics.sites_with_incidents} of {metrics.total_supported_sites} sites ({metrics.portfolio_coverage_percentage:.1f}%) had activity - most sites stable with zero incidents")
+            elif metrics.portfolio_coverage_percentage > 80:
+                insights.append(f"⚠️ High activity portfolio: {metrics.sites_with_incidents} of {metrics.total_supported_sites} sites ({metrics.portfolio_coverage_percentage:.1f}%) had incidents - investigate underlying issues")
         else:
-            insights.append("🔴 System stability needs attention with multiple sites having critical incidents")
+            # Fall back to original insights for backward compatibility
+            if metrics.overall_stability_percentage >= 95:
+                insights.append("🟢 Excellent system stability with 95%+ of sites running without critical incidents")
+            elif metrics.overall_stability_percentage >= 85:
+                insights.append("🟡 Good system stability, but some sites experiencing critical issues")
+            else:
+                insights.append("🔴 System stability needs attention with multiple sites having critical incidents")
         
         # Weighted score insights
         if abs(metrics.weighted_stability_score - metrics.overall_stability_percentage) > 10:

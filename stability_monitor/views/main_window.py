@@ -98,6 +98,25 @@ class MainWindow:
         self.refresh_btn = ttk.Button(toolbar_frame, text="🔄 Refresh", command=self._on_refresh, state="disabled")
         self.refresh_btn.pack(side=tk.LEFT, padx=(0, 5))
         
+        # Total Sites Configuration (Dynamic)
+        sites_frame = ttk.Frame(toolbar_frame)
+        sites_frame.pack(side=tk.LEFT, padx=(10, 0))
+        
+        ttk.Label(sites_frame, text="Total Sites:").pack(side=tk.LEFT, padx=(0, 2))
+        
+        self.total_sites_var = tk.StringVar()
+        self.total_sites_entry = ttk.Entry(sites_frame, textvariable=self.total_sites_var, width=5)
+        self.total_sites_entry.pack(side=tk.LEFT, padx=(0, 2))
+        self.total_sites_entry.bind('<Return>', self._on_total_sites_changed)
+        self.total_sites_entry.bind('<FocusOut>', self._on_total_sites_changed)
+        
+        self.update_sites_btn = ttk.Button(sites_frame, text="Update", command=self._on_total_sites_changed, width=6)
+        self.update_sites_btn.pack(side=tk.LEFT, padx=(0, 5))
+        
+        # Initialize with current setting
+        current_total = self.settings.get("stability_analysis.total_supported_sites.count", 250)
+        self.total_sites_var.set(str(current_total))
+        
         # Settings button
         settings_btn = ttk.Button(toolbar_frame, text="⚙️ Settings", command=self._on_settings)
         settings_btn.pack(side=tk.RIGHT)
@@ -529,6 +548,35 @@ class MainWindow:
             self.date_to_var.set(now.strftime("%Y-%m-%d"))
         
         self._on_filter_change()
+    
+    def _on_total_sites_changed(self, event=None):
+        """Handle total sites count change"""
+        try:
+            new_total = int(self.total_sites_var.get())
+            if new_total <= 0:
+                raise ValueError("Total sites must be positive")
+                
+            # Update settings
+            self.settings.set("stability_analysis.total_supported_sites.count", new_total)
+            from datetime import datetime
+            self.settings.set("stability_analysis.total_supported_sites.last_updated", datetime.now().isoformat())
+            self.settings.save()
+            
+            # Trigger callback to update analytics
+            if 'total_sites_changed' in self.callbacks:
+                self.callbacks['total_sites_changed'](new_total)
+                
+            self.set_status(f"Total supported sites updated to {new_total}")
+            
+        except ValueError as e:
+            # Reset to previous valid value
+            current_total = self.settings.get("stability_analysis.total_supported_sites.count", 250)
+            self.total_sites_var.set(str(current_total))
+            self.set_status(f"Invalid total sites value - using {current_total}")
+    
+    def get_total_supported_sites(self) -> int:
+        """Get current total supported sites count"""
+        return int(self.total_sites_var.get())
     
     def _clear_dates(self):
         """Clear date range"""
