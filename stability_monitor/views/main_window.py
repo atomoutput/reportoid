@@ -118,6 +118,37 @@ class MainWindow:
         current_total = self.settings.get("stability_analysis.total_supported_sites.count", 250)
         self.total_sites_var.set(str(current_total))
         
+        # Pattern Analysis Configuration
+        pattern_frame = ttk.Frame(toolbar_frame)
+        pattern_frame.pack(side=tk.LEFT, padx=(15, 0))
+        
+        ttk.Label(pattern_frame, text="Sync Window:").pack(side=tk.LEFT, padx=(0, 2))
+        
+        self.sync_window_var = tk.StringVar()
+        self.sync_window_combo = ttk.Combobox(
+            pattern_frame, 
+            textvariable=self.sync_window_var,
+            values=["Exact Minute", "5 Minutes", "15 Minutes", "30 Minutes"],
+            width=12,
+            state="readonly"
+        )
+        self.sync_window_combo.pack(side=tk.LEFT, padx=(0, 2))
+        self.sync_window_combo.bind('<<ComboboxSelected>>', self._on_sync_window_changed)
+        
+        # Set default value
+        self.sync_window_combo.set("5 Minutes")
+        
+        # Quick toggle for multi-window analysis
+        self.multi_window_var = tk.BooleanVar()
+        self.multi_window_check = ttk.Checkbutton(
+            pattern_frame,
+            text="Multi-Window",
+            variable=self.multi_window_var,
+            command=self._on_multi_window_changed
+        )
+        self.multi_window_check.pack(side=tk.LEFT, padx=(5, 0))
+        self.multi_window_var.set(True)  # Default enabled
+        
         # Settings button
         settings_btn = ttk.Button(toolbar_frame, text="⚙️ Settings", command=self._on_settings)
         settings_btn.pack(side=tk.RIGHT)
@@ -580,6 +611,63 @@ class MainWindow:
             current_total = self.settings.get("stability_analysis.total_supported_sites.count", 250)
             self.total_sites_var.set(str(current_total))
             self.set_status(f"Invalid total sites value - using {current_total}")
+    
+    def _on_sync_window_changed(self, event=None):
+        """Handle synchronized incident window change"""
+        window_mapping = {
+            "Exact Minute": {"window_minutes": 0, "tolerance_seconds": 30, "name": "exact_minute"},
+            "5 Minutes": {"window_minutes": 5, "name": "tight_window"},
+            "15 Minutes": {"window_minutes": 15, "name": "medium_window"},
+            "30 Minutes": {"window_minutes": 30, "name": "broad_window"}
+        }
+        
+        selected = self.sync_window_var.get()
+        if selected in window_mapping:
+            config = window_mapping[selected]
+            
+            # Update the primary sync window setting
+            self.settings.set("pattern_analysis.sync_time_window_minutes", config["window_minutes"])
+            
+            # Enable the selected window type and disable others
+            sync_windows = self.settings.get("pattern_analysis.sync_time_windows", {})
+            for window_name, window_config in sync_windows.items():
+                if window_name == config["name"]:
+                    window_config["enabled"] = True
+                else:
+                    window_config["enabled"] = False
+            
+            self.settings.set("pattern_analysis.sync_time_windows", sync_windows)
+            self.settings.save()
+            
+            # Trigger callback to update pattern analysis
+            if 'pattern_settings_changed' in self.callbacks:
+                self.callbacks['pattern_settings_changed']()
+                
+            self.set_status(f"Sync window updated to {selected}")
+    
+    def _on_multi_window_changed(self):
+        """Handle multi-window analysis toggle"""
+        enabled = self.multi_window_var.get()
+        
+        # Update setting
+        self.settings.set("pattern_analysis.enable_multi_window_analysis", enabled)
+        
+        if enabled:
+            # Enable all configured windows when multi-window is on
+            sync_windows = self.settings.get("pattern_analysis.sync_time_windows", {})
+            for window_name, window_config in sync_windows.items():
+                if window_name != "broad_window":  # Keep broad window disabled by default
+                    window_config["enabled"] = True
+            self.settings.set("pattern_analysis.sync_time_windows", sync_windows)
+        
+        self.settings.save()
+        
+        # Trigger callback to update pattern analysis
+        if 'pattern_settings_changed' in self.callbacks:
+            self.callbacks['pattern_settings_changed']()
+            
+        status_text = "Multi-window analysis enabled" if enabled else "Single window analysis mode"
+        self.set_status(status_text)
     
     def get_total_supported_sites(self) -> int:
         """Get current total supported sites count"""

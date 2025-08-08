@@ -67,7 +67,7 @@ class TimePatternEngine:
         
         # Configuration
         self.pattern_config = settings.get("pattern_analysis", {
-            "sync_time_window_minutes": 30,      # Window for synchronized incidents
+            "sync_time_window_minutes": 5,       # Default tight window
             "min_sites_for_sync": 2,             # Minimum sites for synchronized pattern
             "correlation_threshold": 0.6,        # Minimum correlation for pattern detection
             "recurring_pattern_days": 7,         # Look for weekly recurring patterns
@@ -75,6 +75,11 @@ class TimePatternEngine:
             "cluster_epsilon": 0.5,              # Clustering parameter (unused without sklearn)
             "min_incidents_for_pattern": 3       # Minimum incidents to establish pattern
         })
+        
+        # Enhanced multi-window configuration
+        self.sync_windows = self.pattern_config.get("sync_time_windows", {})
+        self.enable_multi_window = self.pattern_config.get("enable_multi_window_analysis", True)
+        self.advanced_correlation = self.pattern_config.get("advanced_correlation_scoring", True)
     
     def analyze_temporal_patterns(self, df: pd.DataFrame) -> Dict[str, Any]:
         """
@@ -101,10 +106,152 @@ class TimePatternEngine:
     
     def _detect_synchronized_incidents(self, df: pd.DataFrame) -> List[SynchronizedIncident]:
         """
-        Detect incidents that occurred across multiple sites within a short time window
+        Enhanced synchronized incident detection with configurable time windows
         """
         sync_incidents = []
-        time_window_minutes = self.pattern_config.get("sync_time_window_minutes", 30)
+        
+        if df.empty:
+            return []
+        
+        # If multi-window analysis is enabled, use enhanced detection
+        if self.enable_multi_window and self.sync_windows:
+            return self._detect_synchronized_incidents_multi_window(df)
+        
+        # Fallback to legacy single-window detection
+        return self._detect_synchronized_incidents_legacy(df)
+    
+    def _detect_synchronized_incidents_multi_window(self, df: pd.DataFrame) -> List[SynchronizedIncident]:
+        """
+        Enhanced multi-window synchronized incident detection
+        """
+        all_sync_incidents = []
+        processed_global = set()
+        
+        # Analyze each configured time window
+        for window_name, window_config in self.sync_windows.items():
+            if not window_config.get("enabled", True):
+                continue
+            
+            self.logger.info(f"Analyzing synchronized incidents with {window_name} ({window_config.get('window_minutes', 0)} minutes)")
+            
+            # Filter incidents by priority scope
+            priority_scope = window_config.get("priority_scope", ["1 - Critical"])
+            filtered_df = df[df['Priority'].isin(priority_scope)].copy()
+            
+            if filtered_df.empty:
+                continue
+            
+            # Sort by creation time
+            filtered_df = filtered_df.sort_values('Created')
+            
+            window_sync_incidents = self._analyze_time_window(
+                filtered_df, 
+                window_name,
+                window_config,
+                processed_global
+            )
+            
+            all_sync_incidents.extend(window_sync_incidents)
+        
+        # Sort by timestamp and remove duplicates
+        unique_incidents = self._deduplicate_sync_incidents(all_sync_incidents)
+        
+        return sorted(unique_incidents, key=lambda x: x.timestamp)
+    
+    def _analyze_time_window(self, df: pd.DataFrame, window_name: str, config: dict, processed_global: set) -> List[SynchronizedIncident]:
+        """
+        Analyze a specific time window configuration
+        """
+        sync_incidents = []
+        window_minutes = config.get("window_minutes", 5)
+        tolerance_seconds = config.get("tolerance_seconds", 0)
+        min_sites = config.get("min_sites", 2)
+        correlation_threshold = config.get("correlation_threshold", 0.6)
+        
+        processed_indices = set()
+        
+        for idx, incident in df.iterrows():
+            if idx in processed_indices or idx in processed_global:
+                continue
+            
+            incident_time = incident['Created']
+            
+            # Handle exact minute analysis with tolerance
+            if window_minutes == 0:  # Exact minute mode
+                # Find incidents in same minute with tolerance
+                minute_start = incident_time.replace(second=0, microsecond=0)
+                minute_end = minute_start + timedelta(minutes=1)
+                
+                # Apply tolerance within the minute
+                if tolerance_seconds > 0:
+                    tolerance_delta = timedelta(seconds=tolerance_seconds)
+                    window_start = max(minute_start, incident_time - tolerance_delta)
+                    window_end = min(minute_end, incident_time + tolerance_delta)
+                else:
+                    window_start = minute_start
+                    window_end = minute_end
+            else:
+                # Regular time window
+                time_window = timedelta(minutes=window_minutes)
+                window_start = incident_time - time_window
+                window_end = incident_time + time_window
+            
+            # Find incidents within time window at different sites
+            window_mask = (
+                (df['Created'] >= window_start) &
+                (df['Created'] <= window_end) &
+                (df['Site'] != incident['Site']) &  # Different sites
+                (df.index != idx)  # Not the same incident
+            )
+            
+            window_incidents = df[window_mask]
+            
+            # Check if we have enough sites
+            unique_sites = set([incident['Site']] + list(window_incidents['Site'].unique()))
+            
+            if len(unique_sites) >= min_sites:
+                # Create list of all incidents in this sync event
+                all_incidents = [incident.to_dict()] + [inc.to_dict() for _, inc in window_incidents.iterrows()]
+                
+                # Calculate enhanced correlation score
+                if self.advanced_correlation:
+                    correlation_score = self._calculate_enhanced_correlation_score(all_incidents, window_name)
+                else:
+                    correlation_score = self._calculate_sync_correlation_score(all_incidents)
+                
+                if correlation_score >= correlation_threshold:
+                    # Calculate precise time span for this group
+                    timestamps = [inc['Created'] for inc in all_incidents]
+                    time_span_seconds = (max(timestamps) - min(timestamps)).total_seconds()
+                    
+                    sync_incident = SynchronizedIncident(
+                        timestamp=incident_time,
+                        sites=list(unique_sites),
+                        incidents=all_incidents,
+                        correlation_score=correlation_score,
+                        time_window_minutes=window_minutes if window_minutes > 0 else time_span_seconds/60
+                    )
+                    
+                    # Add window analysis metadata
+                    sync_incident.window_type = window_name
+                    sync_incident.actual_time_span_seconds = time_span_seconds
+                    sync_incident.priority_scope = config.get("priority_scope", [])
+                    
+                    sync_incidents.append(sync_incident)
+                    
+                    # Mark as processed
+                    processed_indices.add(idx)
+                    processed_indices.update(window_incidents.index)
+                    processed_global.update([idx] + list(window_incidents.index))
+        
+        return sync_incidents
+    
+    def _detect_synchronized_incidents_legacy(self, df: pd.DataFrame) -> List[SynchronizedIncident]:
+        """
+        Legacy single-window synchronized incident detection (backward compatibility)
+        """
+        sync_incidents = []
+        time_window_minutes = self.pattern_config.get("sync_time_window_minutes", 5)
         min_sites = self.pattern_config.get("min_sites_for_sync", 2)
         
         # Focus on critical incidents for synchronization analysis
@@ -115,7 +262,6 @@ class TimePatternEngine:
         
         # Sort by creation time
         critical_df = critical_df.sort_values('Created')
-        
         processed_indices = set()
         
         for idx, incident in critical_df.iterrows():
@@ -138,7 +284,6 @@ class TimePatternEngine:
             window_incidents = critical_df[window_mask]
             
             if len(window_incidents) >= min_sites - 1:  # -1 because we already have the primary incident
-                
                 # Create list of all incidents in this sync event
                 all_incidents = [incident.to_dict()] + [inc.to_dict() for _, inc in window_incidents.iterrows()]
                 all_sites = [inc['Site'] for inc in all_incidents]
@@ -203,6 +348,110 @@ class TimePatternEngine:
                 scores.append(0.4)
         
         return sum(scores) / len(scores) if scores else 0.0
+    
+    def _calculate_enhanced_correlation_score(self, incidents: List[Dict], window_type: str) -> float:
+        """Calculate enhanced correlation score with window-specific logic"""
+        if len(incidents) < 2:
+            return 0.0
+        
+        scores = []
+        
+        # Base correlation score
+        base_score = self._calculate_sync_correlation_score(incidents)
+        scores.append(base_score)
+        
+        # Time precision bonus for exact minute windows
+        if window_type == "exact_minute":
+            timestamps = [inc.get('Created') for inc in incidents if inc.get('Created')]
+            if len(timestamps) >= 2:
+                time_span = max(timestamps) - min(timestamps)
+                time_span_seconds = time_span.total_seconds()
+                
+                # Bonus for very tight timing (within 60 seconds)
+                if time_span_seconds <= 60:
+                    precision_bonus = 1.0 - (time_span_seconds / 60)
+                    scores.append(precision_bonus * 0.3)  # Up to 30% bonus
+        
+        # Site diversity bonus
+        unique_sites = set(inc.get('Site', '') for inc in incidents)
+        if len(unique_sites) >= 3:
+            diversity_bonus = min(0.2, (len(unique_sites) - 2) * 0.05)  # Up to 20% bonus
+            scores.append(diversity_bonus)
+        
+        # Priority consistency bonus
+        priorities = [inc.get('Priority', '').lower() for inc in incidents]
+        unique_priorities = set(priorities)
+        if len(unique_priorities) == 1 and 'critical' in unique_priorities:
+            scores.append(0.1)  # 10% bonus for all critical
+        
+        # Description keyword clustering
+        descriptions = [inc.get('Short description', '').lower() for inc in incidents]
+        common_keywords = self._find_technical_keywords(descriptions)
+        if len(common_keywords) >= 2:
+            keyword_bonus = min(0.25, len(common_keywords) * 0.05)  # Up to 25% bonus
+            scores.append(keyword_bonus)
+        
+        return min(1.0, sum(scores) / len(scores))
+    
+    def _find_technical_keywords(self, descriptions: List[str]) -> Set[str]:
+        """Find common technical keywords that suggest related issues"""
+        technical_terms = {
+            'network', 'server', 'connection', 'timeout', 'database', 'system',
+            'power', 'internet', 'wifi', 'router', 'switch', 'firewall',
+            'pos', 'terminal', 'payment', 'credit', 'card', 'receipt',
+            'backup', 'restore', 'update', 'patch', 'reboot', 'restart',
+            'error', 'failure', 'crash', 'hang', 'freeze', 'slow', 'down'
+        }
+        
+        word_sets = []
+        for desc in descriptions:
+            if desc and desc != 'nan':
+                words = set(desc.lower().split())
+                # Find intersection with technical terms
+                technical_words = words.intersection(technical_terms)
+                if technical_words:
+                    word_sets.append(technical_words)
+        
+        if len(word_sets) < 2:
+            return set()
+        
+        # Find common technical terms across descriptions
+        common = word_sets[0]
+        for word_set in word_sets[1:]:
+            common = common.intersection(word_set)
+        
+        return common
+    
+    def _deduplicate_sync_incidents(self, sync_incidents: List[SynchronizedIncident]) -> List[SynchronizedIncident]:
+        """Remove duplicate synchronized incidents found in multiple windows"""
+        if not sync_incidents:
+            return []
+        
+        unique_incidents = []
+        processed_incident_sets = set()
+        
+        for sync_incident in sync_incidents:
+            # Create a signature for this incident group based on involved sites and time
+            sites_signature = tuple(sorted(sync_incident.sites))
+            time_signature = sync_incident.timestamp.replace(second=0, microsecond=0)
+            incident_signature = (sites_signature, time_signature)
+            
+            if incident_signature not in processed_incident_sets:
+                unique_incidents.append(sync_incident)
+                processed_incident_sets.add(incident_signature)
+            else:
+                # If we have a duplicate, keep the one with higher correlation score
+                existing_idx = None
+                for i, existing in enumerate(unique_incidents):
+                    existing_sig = (tuple(sorted(existing.sites)), existing.timestamp.replace(second=0, microsecond=0))
+                    if existing_sig == incident_signature:
+                        existing_idx = i
+                        break
+                
+                if existing_idx is not None and sync_incident.correlation_score > unique_incidents[existing_idx].correlation_score:
+                    unique_incidents[existing_idx] = sync_incident
+        
+        return unique_incidents
     
     def _find_common_words(self, descriptions: List[str]) -> Set[str]:
         """Find common words across descriptions (ignoring common stopwords)"""

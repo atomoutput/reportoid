@@ -90,13 +90,51 @@ class Settings:
                 }
             },
             "pattern_analysis": {
-                "sync_time_window_minutes": 30,
+                # Enhanced Synchronized Incident Detection
+                "sync_time_windows": {
+                    "exact_minute": {
+                        "enabled": True,
+                        "window_minutes": 0,  # Same minute only
+                        "tolerance_seconds": 30,  # Allow 30-second variance within minute
+                        "min_sites": 2,
+                        "correlation_threshold": 0.7,
+                        "priority_scope": ["1 - Critical", "2 - High"]
+                    },
+                    "tight_window": {
+                        "enabled": True,
+                        "window_minutes": 5,  # 5-minute window
+                        "min_sites": 2,
+                        "correlation_threshold": 0.6,
+                        "priority_scope": ["1 - Critical"]
+                    },
+                    "medium_window": {
+                        "enabled": True,
+                        "window_minutes": 15,  # 15-minute window
+                        "min_sites": 3,  # Require more sites for longer window
+                        "correlation_threshold": 0.7,  # Higher threshold for longer window
+                        "priority_scope": ["1 - Critical"]
+                    },
+                    "broad_window": {
+                        "enabled": False,  # Disabled by default
+                        "window_minutes": 30,  # Original 30-minute window
+                        "min_sites": 4,  # Much higher threshold
+                        "correlation_threshold": 0.8,  # Very high correlation required
+                        "priority_scope": ["1 - Critical"]
+                    }
+                },
+                # Legacy settings for backward compatibility
+                "sync_time_window_minutes": 5,  # Default to tight window
                 "min_sites_for_sync": 2,
                 "correlation_threshold": 0.6,
+                # Other pattern analysis settings
                 "recurring_pattern_days": 7,
                 "seasonal_analysis_weeks": 12,
                 "cluster_epsilon": 0.5,
-                "min_incidents_for_pattern": 3
+                "min_incidents_for_pattern": 3,
+                # Enhanced analysis features
+                "enable_multi_window_analysis": True,
+                "include_high_priority_sync": True,
+                "advanced_correlation_scoring": True
             },
             "export": {
                 "default_format": "csv",
