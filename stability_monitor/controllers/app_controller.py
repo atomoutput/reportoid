@@ -1377,28 +1377,15 @@ class AppController:
             quality_tab = self.main_window.get_quality_tab()
             result = quality_tab.show_review_dialog(target_group)
             
+            # Let the quality tab handle the result and update the UI with enhanced feedback
+            quality_tab.handle_review_result(group_id, result)
+            
+            # Update controller's pending decisions list for processing
             if result and result["action"] != "skip":
-                # Add decision to pending list instead of processing immediately
+                # Add decision to controller's pending list for actual processing
                 result['group_id'] = group_id
                 result['timestamp'] = datetime.now()
                 self.pending_review_decisions.append(result)
-                
-                # Update UI to show pending changes
-                quality_tab = self.main_window.get_quality_tab()
-                quality_tab.update_pending_changes(len(self.pending_review_decisions))
-                
-                # Show confirmation message
-                if result["action"] == "merge":
-                    message = f"Merge decision added to pending changes.\n\n"
-                    message += f"Primary: {result['primary_ticket_id']}\n"
-                    message += f"Duplicates: {', '.join(result['duplicate_ticket_ids'])}\n\n"
-                    message += f"Click 'Apply Changes' to process all pending decisions."
-                elif result["action"] == "dismiss":
-                    message = f"Dismiss decision added to pending changes.\n\n"
-                    message += f"Tickets: {', '.join(result.get('ticket_ids', []))}\n\n" 
-                    message += f"Click 'Apply Changes' to process all pending decisions."
-                
-                messagebox.showinfo("Decision Pending", message)
                 
         except Exception as e:
             import traceback

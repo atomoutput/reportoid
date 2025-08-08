@@ -147,8 +147,9 @@ class DuplicateReviewDialog(tk.Toplevel):
 1. Check the tickets below - similar tickets are grouped together for your review
 2. Use checkboxes to select which tickets should be merged together  
 3. Choose one ticket as 'Primary' - this ticket will be kept, others will be marked as duplicates
-4. Add review notes explaining your decision (optional but recommended)
-5. Click 'Merge as Duplicates' to process, or 'Dismiss' if they are not duplicates
+4. Add review notes explaining your decision (required for dismissals)
+5. Click 'Merge Selected Tickets' or 'Not Duplicates' to record your decision
+6. ⚠️ Decisions are PENDING until you click 'Apply Changes' in the main Data Quality tab
         """
         
         instructions_label = ttk.Label(instructions_frame, text=instructions_text.strip(), 
@@ -385,6 +386,13 @@ class DuplicateReviewDialog(tk.Toplevel):
             "confidence": self.duplicate_group.confidence_score
         }
         
+        # Show success feedback
+        messagebox.showinfo("Decision Recorded", 
+            f"✅ Merge decision recorded for {len(selected_tickets)} tickets.\n\n"
+            f"Primary: {primary_ticket_id}\n"
+            f"To merge: {', '.join(duplicate_ticket_ids)}\n\n"
+            f"Status: Pending - Click 'Apply Changes' to execute.")
+        
         self.destroy()
     
     def _on_dismiss(self):
@@ -399,10 +407,18 @@ class DuplicateReviewDialog(tk.Toplevel):
         
         self.result = {
             "action": "dismiss",
-            "ticket_ids": [str(ticket.get("Number", "N/A")) for ticket in all_tickets],
+            "ticket_ids": [str(self._safe_get_scalar(ticket.get("Number", "N/A"))) for ticket in all_tickets],
             "notes": notes,
             "confidence": self.duplicate_group.confidence_score
         }
+        
+        # Show success feedback
+        ticket_ids = [str(self._safe_get_scalar(ticket.get("Number", "N/A"))) for ticket in all_tickets]
+        messagebox.showinfo("Decision Recorded", 
+            f"❌ Not Duplicates decision recorded.\n\n"
+            f"Tickets: {', '.join(ticket_ids)}\n"
+            f"Reason: {notes}\n\n"
+            f"Status: Pending - Click 'Apply Changes' to execute.")
         
         self.destroy()
     
@@ -412,6 +428,11 @@ class DuplicateReviewDialog(tk.Toplevel):
             "action": "skip",
             "notes": self.notes_text.get("1.0", tk.END).strip()
         }
+        
+        # Show skip feedback
+        messagebox.showinfo("Review Skipped", 
+            f"⏭️ This duplicate group has been skipped.\n\n"
+            f"It will remain in the review queue for later action.")
         
         self.destroy()
     
@@ -545,9 +566,52 @@ class DataQualityTab(ttk.Frame):
         super().__init__(parent)
         self.settings = settings
         self.callbacks = {}
+        self.pending_decisions = []  # Track pending review decisions
+        self.current_queue_data = []  # Store current queue data for refreshes
         
         self._create_widgets()
         self._update_ui_state(data_loaded=False)
+    
+    def handle_review_result(self, group_id, review_result):
+        """Handle the result from a duplicate review dialog"""
+        if review_result is None:
+            # User cancelled - no changes to pending decisions
+            return
+        
+        # Add group_id to the review result
+        review_result['group_id'] = group_id
+        
+        # Remove any existing decision for this group
+        self.pending_decisions = [d for d in self.pending_decisions if d.get('group_id') != group_id]
+        
+        # Add the new decision (unless it was skip - skip doesn't need to be applied)
+        if review_result.get('action') != 'skip':
+            self.pending_decisions.append(review_result)
+        
+        # Refresh the queue display to show the new status
+        if hasattr(self, 'current_queue_data'):
+            self._update_queue_display(self.current_queue_data)
+        
+        # Show status message
+        action = review_result.get('action', 'unknown')
+        if action == 'merge':
+            primary = review_result.get('primary_ticket_id', 'N/A')
+            merge_count = len(review_result.get('duplicate_ticket_ids', []))
+            status_msg = f"Merge decision recorded: {merge_count} tickets → {primary}"
+        elif action == 'dismiss':
+            dismiss_count = len(review_result.get('ticket_ids', []))
+            status_msg = f"Not duplicates decision recorded for {dismiss_count} tickets"
+        elif action == 'skip':
+            status_msg = "Group skipped - will remain in queue for later review"
+        else:
+            status_msg = f"{action.title()} decision recorded"
+        
+        # Update status label temporarily
+        if hasattr(self, 'queue_status_label'):
+            original_text = self.queue_status_label.cget('text')
+            self.queue_status_label.config(text=f"✅ {status_msg}", foreground='green')
+            # Reset after 3 seconds
+            self.after(3000, lambda: self.queue_status_label.config(text=original_text, foreground='black'))
     
     def _create_widgets(self):
         """Create the data quality management interface"""
@@ -855,17 +919,72 @@ class DataQualityTab(ttk.Frame):
             self._update_audit_display(audit_data)
     
     def _update_queue_display(self, queue_data):
-        """Update duplicate queue tree display"""
+        """Update duplicate queue tree display with pending status and enhanced feedback"""
+        # Store queue data for future refreshes
+        self.current_queue_data = queue_data
+        
         # Clear existing items
         for item in self.queue_tree.get_children():
             self.queue_tree.delete(item)
         
-        # Add new items
-        for group in queue_data:
-            self.queue_tree.insert('', 'end', values=group)
+        # Create lookup for pending decisions
+        pending_groups = {decision.get('group_id'): decision for decision in self.pending_decisions}
         
-        # Update status
-        self.queue_status_label.config(text=f"{len(queue_data)} duplicate groups in queue")
+        # Add new items with status updates
+        reviewed_count = 0
+        for group in queue_data:
+            group_values = list(group)  # Convert to mutable list
+            group_id = group_values[0]  # Assume first column is group ID
+            
+            # Check if this group has a pending decision
+            if group_id in pending_groups:
+                pending_decision = pending_groups[group_id]
+                action = pending_decision.get('action', 'unknown')
+                
+                # Update the status column with detailed pending info
+                if action == "merge":
+                    primary = pending_decision.get('primary_ticket_id', 'N/A')
+                    merge_count = len(pending_decision.get('duplicate_ticket_ids', []))
+                    group_values[-1] = f"✅ MERGE PENDING → {primary} (+{merge_count})"
+                elif action == "dismiss":
+                    dismiss_count = len(pending_decision.get('ticket_ids', []))
+                    group_values[-1] = f"❌ NOT DUPLICATES → {dismiss_count} tickets"
+                elif action == "skip":
+                    group_values[-1] = f"⏭️ SKIPPED → Will review later"
+                else:
+                    group_values[-1] = f"⏳ {action.upper()} PENDING"
+                
+                reviewed_count += 1
+                
+                # Insert with different styling for pending items
+                item_id = self.queue_tree.insert('', 'end', values=group_values, tags=('pending',))
+            else:
+                # Regular item without pending decision
+                self.queue_tree.insert('', 'end', values=group_values, tags=('normal',))
+        
+        # Configure tags for enhanced visual distinction
+        self.queue_tree.tag_configure('pending', background='#e6f3ff', foreground='#0066cc', font=('Arial', 9, 'bold'))
+        self.queue_tree.tag_configure('normal', background='white', foreground='black')
+        
+        # Update status with comprehensive information
+        if reviewed_count > 0:
+            status_text = f"{len(queue_data)} duplicate groups ({reviewed_count} reviewed, pending execution)"
+            self.queue_status_label.config(text=status_text, foreground="#0066cc")
+            
+            # Update pending changes counter
+            self.pending_changes_label.config(text=f"({reviewed_count} pending changes)")
+            
+            # Enable Apply Changes button
+            self.apply_changes_btn.config(state="normal")
+        else:
+            status_text = f"{len(queue_data)} duplicate groups in queue"
+            self.queue_status_label.config(text=status_text, foreground="black")
+            
+            # Clear pending changes counter
+            self.pending_changes_label.config(text="")
+            
+            # Disable Apply Changes button
+            self.apply_changes_btn.config(state="disabled")
     
     def _update_audit_display(self, audit_data):
         """Update audit trail tree display"""
@@ -957,11 +1076,16 @@ RECOMMENDATIONS
         self.wait_window(dialog)
         return dialog.result
     
-    def update_pending_changes(self, count: int):
-        """Update the pending changes counter"""
-        if count > 0:
-            self.pending_changes_label.config(text=f"({count} pending)")
-            self.apply_changes_btn.config(state="normal")
-        else:
-            self.pending_changes_label.config(text="")
-            self.apply_changes_btn.config(state="disabled")
+    def update_pending_changes(self, count: int, pending_decisions=None):
+        """Legacy method - now handled by handle_review_result and _update_queue_display"""
+        # This method is kept for backward compatibility but functionality
+        # has been moved to handle_review_result() and _update_queue_display()
+        # which provide better user feedback and visual indicators
+        
+        if pending_decisions:
+            self.pending_decisions = pending_decisions
+            
+            # Refresh display with current queue data if available
+            if hasattr(self, 'current_queue_data') and self.current_queue_data:
+                self._update_queue_display(self.current_queue_data)
+        self._refresh_duplicate_queue()
